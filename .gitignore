@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+node-app/node_modules/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+node-app/.env
+node-app/.env.*
+!node-app/.env.example
+
+# Logs and runtime files
+*.log
+logs/
+pids/
+*.pid
+
+# Local application data
+node-app/data/
+
+# Operating-system and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.vercel/
