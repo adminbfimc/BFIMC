@@ -34,19 +34,37 @@ const routes = {
 };
 
 for (const [url, page] of Object.entries(routes)) {
-  app.get(url, async (req, res) => renderPage(res, page, req.query.status, req));
+  app.get(url, async (req, res) => {
+    const user = await sessionUser(req, res);
+    if (user?.isAdmin) return res.redirect('/admin');
+    if (user?.isStaff) return res.redirect('/staff/content');
+    renderPage(res, page, req.query.status, user);
+  });
 }
 
 app.get('/auth', async (req, res) => {
-  if (await sessionUser(req, res)) return res.redirect('/profile');
+  const user = await sessionUser(req, res);
+  if (user) return res.redirect(user.isAdmin ? '/admin' : user.isStaff ? '/staff/content' : '/');
   renderAuth(res, req.query.mode, req.query.status);
 });
 app.get('/forgot-password', (req, res) => renderForgotPassword(res, req.query.status));
 app.get('/reset-password', (req, res) => renderResetPassword(res, req.query.token, req.query.status));
 app.get('/verify-email', (req, res) => renderVerifyEmail(res, req.query.email, req.query.status));
 app.get('/auth/callback', (req, res) => renderAuthCallback(res));
-app.get('/profile', requireUser, (req, res) => renderProfile(res, req.user, req.query.status));
+app.get('/profile', requireUser, (req, res) => {
+  if (req.user.isAdmin || req.user.isStaff) return res.redirect('/account');
+  renderProfile(res, req.user, req.query.status);
+});
+app.get('/account', requireUser, (req, res) => renderRoleProfile(res, req.user, req.query.status));
 app.get('/admin', requireAdmin, async (req, res) => renderAdmin(res, req.user, req.query.status));
+app.get('/admin/content', requireAdmin, async (req, res) => renderAdmin(res, req.user, req.query.status, 'content'));
+app.get('/admin/inbox', requireAdmin, async (req, res) => renderAdmin(res, req.user, req.query.status, 'inbox'));
+app.get('/admin/accounts', requireAdmin, async (req, res) => renderAdmin(res, req.user, req.query.status, 'accounts'));
+app.get('/admin/users', requireAdmin, async (req, res) => renderAdmin(res, req.user, req.query.status, 'users'));
+app.get('/admin/staff', requireAdmin, (req, res) => res.redirect('/admin/accounts'));
+app.get('/staff', requireStaff, (req, res) => res.redirect('/staff/content'));
+app.get('/staff/content', requireStaff, async (req, res) => renderAdmin(res, req.user, req.query.status, 'content', true));
+app.get('/staff/inbox', requireStaff, async (req, res) => renderAdmin(res, req.user, req.query.status, 'inbox', true));
 
 app.post('/contact', handleSubmission('contact', ['name', 'email', 'subject', 'message']));
 app.post('/membership-application', handleSubmission('membership application', [
@@ -65,12 +83,17 @@ app.post('/forgot-password', handleForgotPassword);
 app.post('/reset-password', handleResetPassword);
 app.post('/verify-email', handleVerifyEmail);
 app.post('/verify-email/resend', handleResendVerification);
-app.post('/admin/portfolio', requireAdmin, handlePortfolioSave);
-app.post('/admin/portfolio/:id/delete', requireAdmin, handlePortfolioDelete);
+app.post('/admin/portfolio', requireStaff, express.raw({ type: 'multipart/form-data', limit: '5mb' }), parsePortfolioUpload, handlePortfolioSave);
+app.post('/admin/portfolio/:id/delete', requireStaff, handlePortfolioDelete);
 app.post('/admin/admins', requireAdmin, handleAdminAdd);
 app.post('/admin/admins/:id/delete', requireAdmin, handleAdminDelete);
+app.post('/admin/users/:id/delete', requireAdmin, handleUserAccountDelete);
+app.post('/admin/staff', requireAdmin, handleStaffCreate);
+app.post('/admin/staff/:id/delete', requireAdmin, handleStaffDelete);
 app.post('/profile/details', requireUser, handleProfileDetails);
 app.post('/profile/password', requireUser, handleProfilePassword);
+app.post('/account/name', requireUser, handleRoleNameUpdate);
+app.post('/account/password', requireUser, handleRolePasswordUpdate);
 
 app.use((req, res) => res.status(404).send('Page not found.'));
 
@@ -80,7 +103,7 @@ if (require.main === module) {
   });
 }
 
-async function renderPage(res, { page, title }, status, req) {
+async function renderPage(res, { page, title }, status, user) {
   const message = status === 'sent'
     ? '<div class="container pt-5 mt-5"><div class="alert alert-success">Your submission has been sent successfully.</div></div>'
     : status === 'error'
@@ -88,7 +111,7 @@ async function renderPage(res, { page, title }, status, req) {
       : '';
 
   const content = page === 'portfolio' ? await portfolioFragment() : fragment(page);
-  res.type('html').send(`${header(title, await sessionUser(req, res))}${message}${content}${footer()}`);
+  res.type('html').send(`${header(title, user)}${message}${content}${footer()}`);
 }
 
 function handleSubmission(type, fields) {
@@ -270,6 +293,14 @@ function renderProfile(res, user, status) {
   res.type('html').send(`${header('BFIMC | Profile', user)}${content}${footer()}`);
 }
 
+function renderRoleProfile(res, user, status) {
+  const messages = { details: 'Your name has been updated.', password: 'Your password has been updated.', current: 'Your current password is incorrect.', mismatch: 'Use a matching password with at least 8 characters.', required: 'Enter both your first and last name.' };
+  const notice = messages[status] ? `<div class="auth-alert ${['details', 'password'].includes(status) ? 'success' : ''}">${messages[status]}</div>` : '';
+  const role = user.isAdmin ? 'Administrator' : 'Staff';
+  const content = `<main class="role-profile-page"><section class="role-profile-shell"><div class="role-profile-heading"><p class="section-kicker">${role} profile</p><h1>My account</h1><p>Manage your name and password.</p></div>${notice}<section class="role-profile-card"><div class="role-profile-email"><span class="admin-avatar">${escapeHtml((user.firstName || user.email).charAt(0).toUpperCase())}</span><div><strong>${escapeHtml(user.email)}</strong><small>${role}</small></div></div><form class="profile-form" action="/account/name" method="post"><h2>Personal details</h2><div class="auth-grid"><label>First name<input name="first_name" value="${escapeHtml(user.firstName)}" required></label><label>Last name<input name="last_name" value="${escapeHtml(user.lastName)}" required></label></div><button class="auth-submit" type="submit">Save name</button></form><form class="profile-form role-password-form" action="/account/password" method="post"><h2>Change password</h2><label>Current password<input name="current_password" type="password" autocomplete="current-password" required></label><div class="auth-grid"><label>New password<input name="password" type="password" minlength="8" autocomplete="new-password" required></label><label>Confirm new password<input name="confirm_password" type="password" minlength="8" autocomplete="new-password" required></label></div><button class="auth-submit" type="submit">Update password</button><a class="forgot-link" href="/forgot-password">Forgot password?</a></form></section></section></main>`;
+  res.type('html').send(adminDocument(content));
+}
+
 async function handleSignup(req, res) {
   const { first_name, last_name, birthdate, gender, email, password, confirm_password } = req.body;
   if (![first_name, last_name, birthdate, gender, email, password, confirm_password].every((value) => String(value || '').trim())) return renderAuth(res, 'signup', 'required', req.body);
@@ -288,7 +319,7 @@ async function handleSignup(req, res) {
   }
   if (!data.session) return res.redirect(`/verify-email?email=${encodeURIComponent(normalizeEmail(email))}`);
   res.setHeader('Set-Cookie', sessionCookie(data.session));
-  res.redirect('/profile?status=registered');
+  res.redirect('/');
 }
 
 async function handleLogin(req, res) {
@@ -301,7 +332,9 @@ async function handleLogin(req, res) {
   if (error || !data.session) return res.redirect('/auth?mode=login&status=invalid');
   res.setHeader('Set-Cookie', sessionCookie(data.session));
   const { data: admin } = await supabase(data.session.access_token).from('admins').select('user_id').eq('user_id', data.user.id).maybeSingle();
-  res.redirect(admin ? '/admin' : '/');
+  if (admin) return res.redirect('/admin');
+  const { data: staff } = await supabase(data.session.access_token).from('staff').select('user_id').eq('user_id', data.user.id).maybeSingle();
+  res.redirect(staff ? '/staff/content' : '/');
 }
 
 async function handleForgotPassword(req, res) {
@@ -328,7 +361,7 @@ async function handleVerifyEmail(req, res) {
   const { data, error } = await supabase().auth.verifyOtp({ email, token, type: 'signup' });
   if (error || !data.session) return res.redirect(`/verify-email?email=${encodeURIComponent(email)}&status=invalid`);
   res.setHeader('Set-Cookie', sessionCookie(data.session));
-  res.redirect('/profile?status=registered');
+  res.redirect('/');
 }
 
 async function handleResendVerification(req, res) {
@@ -357,34 +390,164 @@ async function handleProfilePassword(req, res) {
   res.redirect(`/profile?status=${error ? 'mismatch' : 'password'}`);
 }
 
+async function handleRoleNameUpdate(req, res) {
+  const first_name = String(req.body.first_name || '').trim();
+  const last_name = String(req.body.last_name || '').trim();
+  if (!first_name || !last_name) return res.redirect('/account?status=required');
+  const profile = { first_name, last_name };
+  const { error } = await supabase(req.user.accessToken).from('profiles').update(profile).eq('id', req.user.id);
+  if (!error) await supabase(req.user.accessToken).auth.updateUser({ data: profile });
+  res.redirect(`/account?status=${error ? 'required' : 'details'}`);
+}
+
+async function handleRolePasswordUpdate(req, res) {
+  const { current_password, password, confirm_password } = req.body;
+  const verify = await supabase().auth.signInWithPassword({ email: req.user.email, password: String(current_password || '') });
+  if (verify.error) return res.redirect('/account?status=current');
+  if (String(password || '').length < 8 || password !== confirm_password) return res.redirect('/account?status=mismatch');
+  const { error } = await supabase(req.user.accessToken).auth.updateUser({ password: String(password) });
+  res.redirect(`/account?status=${error ? 'mismatch' : 'password'}`);
+}
+
 async function handlePortfolioSave(req, res) {
   const { id, title, caption, image_url, alt_text, sort_order } = req.body;
-  if (![title, caption, image_url].every((value) => String(value || '').trim())) return res.redirect('/admin?status=portfolio-error');
-  const values = { title: String(title).trim(), caption: String(caption).trim(), image_url: String(image_url).trim(), alt_text: String(alt_text || 'BFIMC portfolio image').trim(), sort_order: Number(sort_order) || 0 };
+  let finalImageUrl = String(image_url || '').trim();
+  if (req.file) {
+    const uploadResult = await uploadPortfolioImage(req.file, req.user.accessToken);
+    if (uploadResult.error) return res.redirect('/admin/content?status=portfolio-error');
+    finalImageUrl = uploadResult.url;
+  }
+  if (![title, caption, finalImageUrl].every((value) => String(value || '').trim())) return res.redirect('/admin/content?status=portfolio-error');
+  const values = { title: String(title).trim(), caption: String(caption).trim(), image_url: finalImageUrl, alt_text: String(alt_text || 'BFIMC portfolio image').trim(), sort_order: Number(sort_order) || 0 };
   const result = id
     ? await supabase(req.user.accessToken).from('portfolio_items').update(values).eq('id', id)
     : await supabase(req.user.accessToken).from('portfolio_items').insert(values);
-  res.redirect(`/admin?status=${result.error ? 'portfolio-error' : 'portfolio-saved'}`);
+  res.redirect(`/admin/content?status=${result.error ? 'portfolio-error' : 'portfolio-saved'}`);
+}
+
+function parsePortfolioUpload(req, res, next) {
+  if (!Buffer.isBuffer(req.body)) return next();
+  const boundary = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(req.headers['content-type'] || '')?.[1] || /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(req.headers['content-type'] || '')?.[2];
+  if (!boundary) return res.redirect('/admin/content?status=portfolio-error');
+  const fields = {};
+  let image;
+  for (const rawPart of req.body.toString('latin1').split(`--${boundary}`)) {
+    const divider = rawPart.indexOf('\r\n\r\n');
+    if (divider < 0) continue;
+    const headers = rawPart.slice(0, divider);
+    let value = rawPart.slice(divider + 4);
+    if (value.endsWith('\r\n')) value = value.slice(0, -2);
+    const name = /name="([^"]+)"/i.exec(headers)?.[1];
+    if (!name) continue;
+    const filename = /filename="([^"]*)"/i.exec(headers)?.[1];
+    if (filename !== undefined && filename) {
+      const mimetype = /content-type:\s*([^\r\n]+)/i.exec(headers)?.[1]?.trim().toLowerCase();
+      if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(mimetype)) return res.redirect('/admin/content?status=portfolio-error');
+      image = { mimetype, buffer: Buffer.from(value, 'latin1') };
+    } else fields[name] = Buffer.from(value, 'latin1').toString('utf8');
+  }
+  req.body = fields;
+  req.file = image;
+  next();
+}
+
+async function uploadPortfolioImage(file, accessToken) {
+  const extension = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' }[file.mimetype];
+  if (!extension) return { error: new Error('Only JPEG, PNG, WebP, and GIF images are allowed.') };
+  const objectPath = `${crypto.randomUUID()}.${extension}`;
+  try {
+    const response = await fetch(`${supabaseUrl}/storage/v1/object/bfimc-content/${objectPath}`, {
+      method: 'POST',
+      headers: { apikey: supabaseAnonKey, Authorization: `Bearer ${accessToken}`, 'Content-Type': file.mimetype, 'x-upsert': 'false' },
+      body: file.buffer
+    });
+    if (!response.ok) return { error: new Error('Image upload failed.') };
+    return { url: `${supabaseUrl}/storage/v1/object/public/bfimc-content/${objectPath}`, error: null };
+  } catch (error) { return { error }; }
 }
 
 async function handlePortfolioDelete(req, res) {
   const { error } = await supabase(req.user.accessToken).from('portfolio_items').delete().eq('id', req.params.id);
-  res.redirect(`/admin?status=${error ? 'portfolio-error' : 'portfolio-deleted'}`);
+  res.redirect(`/admin/content?status=${error ? 'portfolio-error' : 'portfolio-deleted'}`);
 }
 
 async function handleAdminAdd(req, res) {
   const email = normalizeEmail(req.body.email);
-  if (!isEmail(email)) return res.redirect('/admin?status=admin-error');
+  if (!isEmail(email)) return res.redirect('/admin/accounts?status=admin-error');
   const { error } = await supabase(req.user.accessToken).rpc('add_admin_by_email', { target_email: email });
-  res.redirect(`/admin?status=${error ? 'admin-error' : 'admin-added'}`);
+  res.redirect(`/admin/accounts?status=${error ? 'admin-error' : 'admin-added'}`);
 }
 
 async function handleAdminDelete(req, res) {
   const { error } = await supabase(req.user.accessToken).rpc('remove_admin', { target_user_id: req.params.id });
-  res.redirect(`/admin?status=${error ? 'admin-error' : 'admin-deleted'}`);
+  res.redirect(`/admin/accounts?status=${error ? 'admin-error' : 'admin-deleted'}`);
 }
 
-async function renderAdmin(res, user, status) {
+async function handleUserAccountDelete(req, res) {
+  const { error } = await supabase(req.user.accessToken).rpc('delete_user_account', { target_user_id: req.params.id });
+  res.redirect(`/admin/users?status=${error ? 'user-error' : 'user-deleted'}`);
+}
+
+async function handleStaffCreate(req, res) {
+  const fullName = String(req.body.full_name || '').trim();
+  const email = normalizeEmail(req.body.email);
+  const password = String(req.body.password || '');
+  if (!fullName || !isEmail(email) || password.length < 8 || password !== String(req.body.confirm_password || '')) return res.redirect('/admin/accounts?status=staff-error');
+  const [firstName, ...lastName] = fullName.split(/\s+/);
+  const { data, error: signupError } = await supabase().auth.signUp({ email, password, options: { data: { first_name: firstName, last_name: lastName.join(' ') } } });
+  if (signupError || !data?.user) return res.redirect('/admin/accounts?status=staff-error');
+  const { error } = await supabase(req.user.accessToken).rpc('add_staff_by_email', { target_email: email });
+  res.redirect(`/admin/accounts?status=${error ? 'staff-error' : 'staff-added'}`);
+}
+
+async function handleStaffDelete(req, res) {
+  const { error } = await supabase(req.user.accessToken).rpc('remove_staff', { target_user_id: req.params.id });
+  res.redirect(`/admin/accounts?status=${error ? 'staff-error' : 'staff-deleted'}`);
+}
+
+async function renderAdmin(res, user, status, section = 'home', staffMode = false) {
+  const [portfolioResult, inboxResult, adminsResult, usersResult, staffResult] = await Promise.all([
+    supabaseRequest('/rest/v1/portfolio_items?select=*&order=sort_order.asc,id.asc', { token: user.accessToken }),
+    supabaseRequest('/rest/v1/contact_messages?select=*&order=created_at.desc', { token: user.accessToken }),
+    supabaseRequest('/rest/v1/admins?select=*&order=created_at.asc', { token: user.accessToken }),
+    supabase(user.accessToken).rpc('list_user_accounts', {}),
+    supabaseRequest('/rest/v1/staff?select=*&order=created_at.asc', { token: user.accessToken })
+  ]);
+  const portfolio = Array.isArray(portfolioResult.data) ? portfolioResult.data : [];
+  const inbox = Array.isArray(inboxResult.data) ? inboxResult.data : [];
+  const admins = Array.isArray(adminsResult.data) ? adminsResult.data : [];
+  const users = Array.isArray(usersResult.data) ? usersResult.data : [];
+  const staff = Array.isArray(staffResult.data) ? staffResult.data : [];
+  const messages = { 'portfolio-saved': 'Content saved.', 'portfolio-deleted': 'Content deleted.', 'portfolio-error': 'Unable to update content.', 'admin-added': 'Administrator added.', 'admin-deleted': 'Administrator removed.', 'admin-error': 'Unable to update administrators.', 'staff-added': 'Staff account added.', 'staff-deleted': 'Staff account removed.', 'staff-error': 'Unable to update staff accounts.', 'user-deleted': 'User account deleted.', 'user-error': 'Unable to delete this user account.' };
+  const notice = messages[status] ? `<div class="auth-alert ${status.endsWith('saved') || status.endsWith('added') || status.endsWith('deleted') ? 'success' : ''}">${messages[status]}</div>` : '';
+  const counts = { content: portfolio.length, inbox: inbox.length, accounts: admins.length, users: users.length, staff: staff.length };
+  const cards = portfolio.map((item) => `<article class="admin-content-card"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.alt_text)}"><div class="admin-content-card-body"><div class="admin-content-card-meta"><span><i class="bi bi-images"></i> Portfolio post</span><span class="admin-status"><i class="bi bi-check-circle-fill"></i> Published</span></div><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.caption)}</p><small>Added ${new Date(item.created_at).toLocaleDateString()}</small><details class="admin-editor"><summary><i class="bi bi-pencil"></i> Edit content</summary><form class="admin-item" action="/admin/portfolio" method="post"><input type="hidden" name="id" value="${item.id}"><label>Title<input name="title" value="${escapeHtml(item.title)}" required></label><label>Image URL<input name="image_url" value="${escapeHtml(item.image_url)}" required></label><label>Image description<input name="alt_text" value="${escapeHtml(item.alt_text)}"></label><label>Display order<input name="sort_order" type="number" value="${item.sort_order}"><small>Lower numbers appear first.</small></label><label class="admin-field-wide">Description<textarea name="caption" required>${escapeHtml(item.caption)}</textarea></label><div class="admin-edit-actions"><button class="auth-submit" type="submit">Save changes</button><button class="admin-delete" formaction="/admin/portfolio/${item.id}/delete" formmethod="post" type="submit">Delete</button></div></form></details></div></article>`).join('') || '<p class="admin-empty">No content posts found.</p>';
+  const inboxRows = inbox.map((item) => `<article class="admin-message"><h3>${escapeHtml(item.subject)}</h3><p><strong>${escapeHtml(item.name)}</strong> · <a href="mailto:${escapeHtml(item.email)}">${escapeHtml(item.email)}</a></p><p>${escapeHtml(item.message)}</p><small>${new Date(item.created_at).toLocaleString()}</small></article>`).join('') || '<p class="admin-empty">No contact messages yet.</p>';
+  const adminRows = admins.map((admin) => `<li>${escapeHtml(admin.email)}${admin.user_id === user.id ? ' <em>(you)</em>' : `<form action="/admin/admins/${admin.user_id}/delete" method="post"><button class="admin-delete" type="submit">Remove</button></form>`}</li>`).join('');
+  const staffRows = staff.map((member) => `<li>${escapeHtml(member.email)}<form action="/admin/staff/${member.user_id}/delete" method="post"><button class="admin-delete" type="submit">Remove</button></form></li>`).join('') || '<li class="admin-empty">No staff accounts yet.</li>';
+  const userRows = users.map((account) => `<article class="admin-user-row"><span class="admin-avatar">${escapeHtml((account.first_name || account.email || '?').charAt(0).toUpperCase())}</span><div><h3>${escapeHtml(`${account.first_name || ''} ${account.last_name || ''}`.trim() || 'No name provided')}</h3><p>${escapeHtml(account.email)}${account.is_admin ? ' <span class="admin-role">Administrator</span>' : ''}</p><small>Joined ${new Date(account.created_at).toLocaleDateString()}</small></div>${account.user_id === user.id ? '<em class="admin-current-user">Current account</em>' : `<form action="/admin/users/${account.user_id}/delete" method="post"><button class="admin-delete" type="submit"><i class="bi bi-trash"></i> Delete account</button></form>`}</article>`).join('') || '<p class="admin-empty">No user accounts found.</p>';
+  const pages = {
+    home: `<section class="admin-heading"><h1>Dashboard overview</h1><p>A brief view of BFIMC administration.</p></section><section class="admin-stats admin-summary" aria-label="Dashboard totals"><a href="/admin/content"><span class="stat-icon blue"><i class="bi bi-images"></i></span><div><strong>${counts.content}</strong><small>Total content posts</small><em>Manage content <i class="bi bi-arrow-right"></i></em></div></a><a href="/admin/inbox"><span class="stat-icon orange"><i class="bi bi-envelope"></i></span><div><strong>${counts.inbox}</strong><small>Contact messages</small><em>Open inbox <i class="bi bi-arrow-right"></i></em></div></a><a href="/admin/users"><span class="stat-icon green"><i class="bi bi-people"></i></span><div><strong>${counts.users}</strong><small>User accounts</small><em>Manage accounts <i class="bi bi-arrow-right"></i></em></div></a><a href="/admin/accounts"><span class="stat-icon blue"><i class="bi bi-shield-check"></i></span><div><strong>${counts.accounts}</strong><small>Administrator accounts</small><em>Manage access <i class="bi bi-arrow-right"></i></em></div></a></section>`,
+    content: `<section class="admin-heading"><p class="section-kicker">Website content</p><h1>Content manager</h1><p>Create and edit portfolio posts with an image and description.</p></section>${notice}<details class="admin-create"><summary><i class="bi bi-plus-lg"></i> Create content</summary><form class="admin-item admin-new" action="/admin/portfolio" method="post"><label>Title<input name="title" placeholder="e.g. Community outreach" required></label><label>Image URL<input name="image_url" placeholder="/assets/img/portfolio/image.jpg" required></label><label>Image description<input name="alt_text" placeholder="Describe the image"></label><label>Display order<input name="sort_order" type="number" value="0"><small>Lower numbers appear first.</small></label><label class="admin-field-wide">Description<textarea name="caption" placeholder="Write a short description" required></textarea></label><button class="auth-submit" type="submit"><i class="bi bi-check-lg"></i> Save content</button></form></details><div class="admin-content-grid">${cards}</div>`,
+    inbox: `<section class="admin-heading"><p class="section-kicker">Messages</p><h1>Contact inbox</h1><p>Messages submitted through the BFIMC contact form.</p></section><section class="admin-section admin-page-section"><div class="admin-section-heading"><h2>All messages</h2><span>${counts.inbox} total</span></div><div class="admin-inbox">${inboxRows}</div></section>`,
+    accounts: `<section class="admin-heading"><p class="section-kicker">Access control</p><h1>Admin accounts</h1><p>Manage administrator and staff access.</p></section>${notice}<section class="admin-section admin-page-section"><div class="admin-section-heading"><h2>Administrators</h2></div><form class="admin-add" action="/admin/admins" method="post"><input name="email" type="email" placeholder="Existing user email" required><button class="auth-submit" type="submit"><i class="bi bi-person-plus"></i> Add administrator</button></form><ul class="admin-admins">${adminRows}</ul></section><section class="admin-section"><div class="admin-section-heading"><div><p class="section-kicker">Restricted access</p><h2>Staff account management</h2></div><button class="auth-submit" type="button" data-open-staff-modal><i class="bi bi-person-plus"></i> Add staff account</button></div><p class="admin-section-description">Staff can access only Content Manager and Contact Inbox.</p><ul class="admin-admins">${staffRows}</ul></section><div class="admin-modal" data-staff-modal hidden><div class="admin-modal-backdrop" data-close-staff-modal></div><section class="admin-modal-card" role="dialog" aria-modal="true"><button class="admin-modal-close" type="button" data-close-staff-modal><i class="bi bi-x-lg"></i></button><h2>Add Staff Account</h2><p>Create a BFIMC staff login with restricted dashboard access.</p><form class="admin-modal-form" action="/admin/staff" method="post"><label>Full name<input name="full_name" placeholder="e.g. Maria Santos" required></label><label>Position<select disabled><option>Staff</option></select><small>Staff can manage content and view contact messages only.</small></label><label>Email<input name="email" type="email" placeholder="staff@bfimc.com" required></label><div class="auth-grid"><label>Password<input name="password" type="password" minlength="8" placeholder="At least 8 characters" required></label><label>Confirm password<input name="confirm_password" type="password" minlength="8" placeholder="Repeat password" required></label></div><div class="admin-modal-actions"><button class="admin-modal-cancel" type="button" data-close-staff-modal>Cancel</button><button class="auth-submit" type="submit">Create</button></div></form></section></div>`,
+    staff: `<section class="admin-heading"><p class="section-kicker">Staff access</p><h1>Staff accounts</h1><p>Staff can access only Content Manager and Contact Inbox.</p></section>${notice}<section class="admin-section admin-page-section"><form class="admin-add" action="/admin/staff" method="post"><input name="email" type="email" placeholder="Existing user email" required><button class="auth-submit" type="submit"><i class="bi bi-person-plus"></i> Add staff member</button></form><ul class="admin-admins">${staffRows}</ul></section>`,
+    users: `<section class="admin-heading"><p class="section-kicker">Account management</p><h1>User accounts</h1><p>View registered BFIMC accounts and remove accounts when necessary.</p></section>${notice}<section class="admin-section admin-page-section"><div class="admin-section-heading"><h2>All registered users</h2><span>${counts.users} total</span></div><div class="admin-user-list">${userRows}</div></section>`
+  };
+  pages.home = `<section class="admin-heading"><h1>Dashboard overview</h1><p>A brief view of BFIMC administration.</p></section><section class="admin-stats admin-summary" aria-label="Dashboard totals"><a href="/admin/content"><span class="stat-icon blue"><i class="bi bi-images"></i></span><div><strong>${counts.content}</strong><small>Total content posts</small><em>Manage content <i class="bi bi-arrow-right"></i></em></div></a><a href="/admin/inbox"><span class="stat-icon orange"><i class="bi bi-envelope"></i></span><div><strong>${counts.inbox}</strong><small>Contact messages</small><em>Open inbox <i class="bi bi-arrow-right"></i></em></div></a><a href="/admin/users"><span class="stat-icon green"><i class="bi bi-people"></i></span><div><strong>${counts.users}</strong><small>User accounts</small><em>Manage accounts <i class="bi bi-arrow-right"></i></em></div></a><a href="/admin/staff"><span class="stat-icon blue"><i class="bi bi-person-workspace"></i></span><div><strong>${counts.staff}</strong><small>Staff accounts</small><em>Manage staff <i class="bi bi-arrow-right"></i></em></div></a></section>`;
+  const active = ['home', 'content', 'inbox', 'accounts', 'users', 'staff'].includes(section) ? section : 'home';
+  const allowedActive = staffMode && !['content', 'inbox'].includes(active) ? 'content' : active;
+  res.type('html').send(adminDocument(adminFrame(user, allowedActive, `${allowedActive !== 'home' ? '' : notice}${pages[allowedActive]}`, staffMode)));
+}
+
+function adminFrame(user, active, page, staffMode = false) {
+  const initials = escapeHtml((user.firstName || user.email).trim().charAt(0).toUpperCase());
+  const nav = (key, href, icon, label) => `<a class="${active === key ? 'active' : ''}" href="${href}"><i class="bi bi-${icon}"></i> ${label}</a>`;
+  const navigation = staffMode ? `${nav('content', '/staff/content', 'upload', 'Content manager')}${nav('inbox', '/staff/inbox', 'inbox', 'Contact inbox')}${nav('profile', '/account', 'person-circle', 'My profile')}` : `${nav('home', '/admin', 'house', 'Home')}${nav('content', '/admin/content', 'upload', 'Content manager')}${nav('inbox', '/admin/inbox', 'inbox', 'Contact inbox')}${nav('users', '/admin/users', 'people', 'Account manager')}${nav('accounts', '/admin/accounts', 'shield-check', 'Admin accounts')}${nav('profile', '/account', 'person-circle', 'My profile')}`;
+  return `<main class="admin-page"><aside class="admin-sidebar"><a class="admin-brand" href="${staffMode ? '/staff/content' : '/admin'}"><span class="admin-brand-mark"><i class="bi bi-shield-check"></i></span><span><strong>BFIMC</strong><small>${staffMode ? 'Staff portal' : 'Administration'}</small></span></a><nav class="admin-nav" aria-label="Admin navigation">${navigation}</nav><form class="admin-logout" action="/logout" method="post"><button type="submit"><i class="bi bi-box-arrow-right"></i> Log out</button></form></aside><section class="admin-workspace"><header class="admin-topbar"><button class="admin-menu-toggle" type="button" aria-label="Open navigation"><i class="bi bi-list"></i></button><div class="admin-user"><span class="admin-avatar">${initials}</span><span><strong>${escapeHtml(user.firstName || 'Staff')}</strong><small>${staffMode ? 'Staff' : 'Administrator'}</small></span></div></header><div class="admin-content">${page}</div></section></main>`;
+}
+
+async function renderAdminLegacy(res, user, status, section = 'home') {
   const [portfolioResult, messagesResult, adminsResult] = await Promise.all([
     supabaseRequest('/rest/v1/portfolio_items?select=*&order=sort_order.asc,id.asc', { token: user.accessToken }),
     supabaseRequest('/rest/v1/contact_messages?select=*&order=created_at.desc', { token: user.accessToken }),
@@ -395,11 +558,16 @@ async function renderAdmin(res, user, status) {
   const portfolio = Array.isArray(portfolioResult.data) ? portfolioResult.data : [];
   const inbox = Array.isArray(messagesResult.data) ? messagesResult.data : [];
   const admins = Array.isArray(adminsResult.data) ? adminsResult.data : [];
-  const portfolioRows = portfolio.map((item) => `<form class="admin-item" action="/admin/portfolio" method="post"><input type="hidden" name="id" value="${item.id}"><input name="title" value="${escapeHtml(item.title)}" required><input name="image_url" value="${escapeHtml(item.image_url)}" required><input name="alt_text" value="${escapeHtml(item.alt_text)}"><input name="sort_order" type="number" value="${item.sort_order}"><textarea name="caption" required>${escapeHtml(item.caption)}</textarea><button class="auth-submit" type="submit">Save</button><button class="admin-delete" formaction="/admin/portfolio/${item.id}/delete" formmethod="post" type="submit">Delete</button></form>`).join('') || '<p>No portfolio items found.</p>';
-  const inboxRows = inbox.map((item) => `<article class="admin-message"><h3>${escapeHtml(item.subject)}</h3><p><strong>${escapeHtml(item.name)}</strong> · <a href="mailto:${escapeHtml(item.email)}">${escapeHtml(item.email)}</a></p><p>${escapeHtml(item.message)}</p><small>${new Date(item.created_at).toLocaleString()}</small></article>`).join('') || '<p>No contact messages yet.</p>';
+  const portfolioRows = portfolio.map((item) => `<article class="admin-content-card"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.alt_text)}"><div class="admin-content-card-body"><div class="admin-content-card-meta"><span><i class="bi bi-images"></i> Portfolio post</span><span class="admin-status"><i class="bi bi-check-circle-fill"></i> Published</span></div><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.caption)}</p><small>Added ${new Date(item.created_at).toLocaleDateString()}</small><details class="admin-editor"><summary><i class="bi bi-pencil"></i> Edit content</summary><form class="admin-item" action="/admin/portfolio" method="post"><input type="hidden" name="id" value="${item.id}"><label>Title<input name="title" value="${escapeHtml(item.title)}" required></label><label>Image URL<input name="image_url" value="${escapeHtml(item.image_url)}" required></label><label>Image description<input name="alt_text" value="${escapeHtml(item.alt_text)}"></label><label>Display order<input name="sort_order" type="number" value="${item.sort_order}"><small>Lower numbers appear first.</small></label><label class="admin-field-wide">Description<textarea name="caption" required>${escapeHtml(item.caption)}</textarea></label><div class="admin-edit-actions"><button class="auth-submit" type="submit">Save changes</button><button class="admin-delete" formaction="/admin/portfolio/${item.id}/delete" formmethod="post" type="submit">Delete</button></div></form></details></div></article>`).join('') || '<p class="admin-empty">No portfolio items found.</p>';
+  const inboxRows = inbox.map((item) => `<article class="admin-message"><h3>${escapeHtml(item.subject)}</h3><p><strong>${escapeHtml(item.name)}</strong> · <a href="mailto:${escapeHtml(item.email)}">${escapeHtml(item.email)}</a></p><p>${escapeHtml(item.message)}</p><small>${new Date(item.created_at).toLocaleString()}</small></article>`).join('') || '<p class="admin-empty">No contact messages yet.</p>';
   const adminRows = admins.map((admin) => `<li>${escapeHtml(admin.email)}${admin.user_id === user.id ? ' <em>(you)</em>' : `<form action="/admin/admins/${admin.user_id}/delete" method="post"><button class="admin-delete" type="submit">Remove</button></form>`}</li>`).join('');
-  const content = `<main class="admin-page"><section class="admin-shell"><div class="admin-heading"><p class="section-kicker">Administration</p><h1>BFIMC Admin</h1><p>Manage portfolio stories, contact messages, and administrator access.</p><a href="/" class="forgot-link">View website</a></div>${notice}<section class="admin-section"><h2>Portfolio posts</h2><form class="admin-item admin-new" action="/admin/portfolio" method="post"><input name="title" placeholder="Title" required><input name="image_url" placeholder="Image path, e.g. /assets/img/portfolio/image-1.jpg" required><input name="alt_text" placeholder="Image description"><input name="sort_order" type="number" value="0"><textarea name="caption" placeholder="Caption" required></textarea><button class="auth-submit" type="submit">Add portfolio item</button></form><div class="admin-list">${portfolioRows}</div></section><section class="admin-section"><h2>Contact inbox</h2><div class="admin-inbox">${inboxRows}</div></section><section class="admin-section"><h2>Manage administrators</h2><form class="admin-add" action="/admin/admins" method="post"><input name="email" type="email" placeholder="Existing user email" required><button class="auth-submit" type="submit">Add administrator</button></form><ul class="admin-admins">${adminRows}</ul></section></section></main>`;
-  res.type('html').send(`${header('BFIMC | Admin', user)}${content}${footer()}`);
+  const initials = escapeHtml((user.firstName || user.email).trim().charAt(0).toUpperCase());
+  const content = `<main class="admin-page"><aside class="admin-sidebar"><a class="admin-brand" href="/admin"><span class="admin-brand-mark"><i class="bi bi-shield-check"></i></span><span><strong>BFIMC</strong><small>Administration</small></span></a><nav class="admin-nav" aria-label="Admin navigation"><a class="active" href="#overview"><i class="bi bi-house"></i> Home</a><a href="#portfolio"><i class="bi bi-upload"></i> Content manager</a><a href="#inbox"><i class="bi bi-inbox"></i> Contact inbox</a><a href="#accounts"><i class="bi bi-shield-check"></i> Admin accounts</a></nav><form class="admin-logout" action="/logout" method="post"><button type="submit"><i class="bi bi-box-arrow-right"></i> Log out</button></form></aside><section class="admin-workspace"><header class="admin-topbar"><button class="admin-menu-toggle" type="button" aria-label="Open navigation"><i class="bi bi-list"></i></button><div class="admin-user"><span class="admin-avatar">${initials}</span><span><strong>${escapeHtml(user.firstName || 'Administrator')}</strong><small>Administrator</small></span></div></header><div class="admin-content"><section class="admin-heading" id="overview"><h1>Dashboard overview</h1><p>Manage BFIMC content, messages, and administrator access from one place.</p></section>${notice}<section class="admin-stats" aria-label="Dashboard totals"><article><span class="stat-icon blue"><i class="bi bi-images"></i></span><div><strong>${portfolio.length}</strong><small>Total content posts</small></div></article><article><span class="stat-icon orange"><i class="bi bi-envelope"></i></span><div><strong>${inbox.length}</strong><small>Contact messages</small></div></article><article><span class="stat-icon green"><i class="bi bi-people"></i></span><div><strong>${admins.length}</strong><small>Administrator accounts</small></div></article></section><section class="admin-section" id="portfolio"><div class="admin-section-heading"><div><p class="section-kicker">Website content</p><h2>Content manager</h2><span class="admin-section-description">Create and edit portfolio posts with an image and description.</span></div><span>${portfolio.length} posts</span></div><details class="admin-create"><summary><i class="bi bi-plus-lg"></i> Create content</summary><form class="admin-item admin-new" action="/admin/portfolio" method="post"><label>Title<input name="title" placeholder="e.g. Community outreach" required></label><label>Image URL<input name="image_url" placeholder="/assets/img/portfolio/image.jpg" required></label><label>Image description<input name="alt_text" placeholder="Describe the image"></label><label>Display order<input name="sort_order" type="number" value="0"><small>Lower numbers appear first.</small></label><label class="admin-field-wide">Description<textarea name="caption" placeholder="Write a short description" required></textarea></label><button class="auth-submit" type="submit"><i class="bi bi-check-lg"></i> Save content</button></form></details><div class="admin-content-grid">${portfolioRows}</div></section><section class="admin-section" id="inbox"><div class="admin-section-heading"><div><p class="section-kicker">Messages</p><h2>Contact inbox</h2></div><span>${inbox.length} total</span></div><div class="admin-inbox">${inboxRows}</div></section><section class="admin-section" id="accounts"><div class="admin-section-heading"><div><p class="section-kicker">Access control</p><h2>Admin accounts</h2></div><span>${admins.length} active</span></div><form class="admin-add" action="/admin/admins" method="post"><input name="email" type="email" placeholder="Existing user email" required><button class="auth-submit" type="submit"><i class="bi bi-person-plus"></i> Add administrator</button></form><ul class="admin-admins">${adminRows}</ul></section></div></section></main>`;
+  res.type('html').send(adminDocument(content));
+}
+
+function adminDocument(content) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>BFIMC | Admin</title><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"><link href="/assets/vendor/bootstrap-icons/bootstrap-icons.css" rel="stylesheet"><link href="/assets/css/style.css" rel="stylesheet"></head><body class="admin-body">${content}<script>document.querySelector('.admin-menu-toggle')?.addEventListener('click',()=>document.querySelector('.admin-page').classList.toggle('admin-menu-open'));document.querySelectorAll('input[name="image_url"]').forEach(input=>{const previous=input.value;const label=input.closest('label');if(previous){const saved=document.createElement('input');saved.type='hidden';saved.name='image_url';saved.value=previous;input.after(saved)}input.type='file';input.name='image';input.accept='image/jpeg,image/png,image/webp,image/gif';input.required=!previous;input.closest('form').enctype='multipart/form-data';if(label)label.firstChild.nodeValue='Image from device';});document.querySelectorAll('input[name="alt_text"]').forEach(input=>input.closest('label')?.remove());document.querySelectorAll('form').forEach(form=>form.addEventListener('submit',event=>{if(event.submitter?.classList.contains('admin-delete')&&!window.confirm('Are you sure you want to delete this item? This cannot be undone.'))event.preventDefault();}));const staffModal=document.querySelector('[data-staff-modal]');document.querySelector('[data-open-staff-modal]')?.addEventListener('click',()=>{staffModal.hidden=false;staffModal.querySelector('input')?.focus()});document.querySelectorAll('[data-close-staff-modal]').forEach(button=>button.addEventListener('click',()=>{staffModal.hidden=true}));</script></body></html>`;
 }
 
 async function portfolioFragment() {
@@ -417,6 +585,13 @@ async function requireAdmin(req, res, next) {
   const user = await sessionUser(req, res);
   if (!user) return res.redirect('/auth?mode=login');
   if (!user.isAdmin) return res.status(403).send('Admin access is required.');
+  req.user = user; next();
+}
+
+async function requireStaff(req, res, next) {
+  const user = await sessionUser(req, res);
+  if (!user) return res.redirect('/auth?mode=login');
+  if (!user.isAdmin && !user.isStaff) return res.status(403).send('Staff access is required.');
   req.user = user; next();
 }
 
@@ -496,8 +671,9 @@ async function sessionUser(req, res) {
   if (!user) return null;
   const { data: profile } = await client.from('profiles').select('first_name,last_name,birthdate,gender').eq('id', user.id).maybeSingle();
   const { data: admin } = await client.from('admins').select('user_id').eq('user_id', user.id).maybeSingle();
+  const { data: staff } = await client.from('staff').select('user_id').eq('user_id', user.id).maybeSingle();
   const metadata = user.user_metadata || {};
-  return { id: user.id, email: user.email, firstName: profile?.first_name || metadata.first_name || '', lastName: profile?.last_name || metadata.last_name || '', birthdate: profile?.birthdate || metadata.birthdate || '', gender: profile?.gender || metadata.gender || '', isAdmin: Boolean(admin), accessToken: activeSession.access_token };
+  return { id: user.id, email: user.email, firstName: profile?.first_name || metadata.first_name || '', lastName: profile?.last_name || metadata.last_name || '', birthdate: profile?.birthdate || metadata.birthdate || '', gender: profile?.gender || metadata.gender || '', isAdmin: Boolean(admin), isStaff: Boolean(staff), accessToken: activeSession.access_token };
 }
 function parseCookies(req) { return Object.fromEntries(String(req.headers.cookie || '').split(';').map((item) => item.trim().split('=').map(decodeURIComponent)).filter((item) => item.length === 2)); }
 function readSession(req) { const value = parseCookies(req).bfimc_session; if (!value) return null; const [payload, signature] = value.split('.'); const expected = crypto.createHmac('sha256', sessionSecret).update(payload).digest('base64url'); if (!signature || signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null; try { return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')); } catch { return null; } }

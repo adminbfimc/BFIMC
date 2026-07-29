@@ -6,7 +6,7 @@ This folder contains the Node.js version of the BFIMC website. Its HTML page fra
 
 1. In this folder, run `npm install`.
 2. Copy `.env.example` to `.env`, then supply the Supabase URL and anon key along with any SMTP settings.
-3. In Supabase Dashboard, open **SQL Editor** and run [`supabase.sql`](./supabase.sql).
+3. In Supabase Dashboard, open **SQL Editor** and run [`supabase.sql`](./supabase.sql). This also creates the `bfimc-content` Storage bucket used when administrators upload images from their device.
 4. In **Authentication → Email Templates → Confirm signup**, paste [`supabase-email-template.html`](./supabase-email-template.html). It provides both an OTP code and a confirmation link. Add `http://localhost:3000/auth/callback` and your deployed `/auth/callback` URL under **Authentication → URL Configuration → Redirect URLs**.
 5. Run `npm start` and open `http://localhost:3000`.
 

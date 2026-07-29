@@ -70,6 +70,12 @@ create table if not exists public.admins (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.staff (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  email text not null unique,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.portfolio_items (
   id bigint generated always as identity primary key,
   title text not null,
@@ -90,6 +96,7 @@ create table if not exists public.contact_messages (
 );
 
 alter table public.admins enable row level security;
+alter table public.staff enable row level security;
 alter table public.portfolio_items enable row level security;
 alter table public.contact_messages enable row level security;
 
@@ -97,17 +104,39 @@ create or replace function public.is_admin()
 returns boolean language sql stable security definer set search_path = public
 as $$ select exists (select 1 from public.admins where user_id = auth.uid()) $$;
 
+create or replace function public.is_staff()
+returns boolean language sql stable security definer set search_path = public
+as $$ select exists (select 1 from public.staff where user_id = auth.uid()) $$;
+
+-- Public images uploaded by administrators for portfolio content.
+insert into storage.buckets (id, name, public)
+values ('bfimc-content', 'bfimc-content', true)
+on conflict (id) do update set public = true;
+
+drop policy if exists "Anyone can view BFIMC content images" on storage.objects;
+create policy "Anyone can view BFIMC content images" on storage.objects for select using (bucket_id = 'bfimc-content');
+drop policy if exists "Admins upload BFIMC content images" on storage.objects;
+create policy "Admins upload BFIMC content images" on storage.objects for insert to authenticated with check (bucket_id = 'bfimc-content' and public.is_admin());
+
 drop policy if exists "Admins can view their own role" on public.admins;
 drop policy if exists "Admins can view administrators" on public.admins;
 create policy "Admins can view administrators" on public.admins for select to authenticated using (public.is_admin());
+drop policy if exists "Staff can view their own role" on public.staff;
+drop policy if exists "Admins can view staff" on public.staff;
+create policy "Staff can view their own role" on public.staff for select to authenticated using (user_id = auth.uid());
+create policy "Admins can view staff" on public.staff for select to authenticated using (public.is_admin());
 drop policy if exists "Anyone can view portfolio items" on public.portfolio_items;
 create policy "Anyone can view portfolio items" on public.portfolio_items for select using (true);
 drop policy if exists "Admins manage portfolio items" on public.portfolio_items;
 create policy "Admins manage portfolio items" on public.portfolio_items for all to authenticated using (public.is_admin()) with check (public.is_admin());
+drop policy if exists "Staff manage portfolio items" on public.portfolio_items;
+create policy "Staff manage portfolio items" on public.portfolio_items for all to authenticated using (public.is_staff()) with check (public.is_staff());
 drop policy if exists "Anyone can submit contact messages" on public.contact_messages;
 create policy "Anyone can submit contact messages" on public.contact_messages for insert to anon, authenticated with check (true);
 drop policy if exists "Admins view contact messages" on public.contact_messages;
 create policy "Admins view contact messages" on public.contact_messages for select to authenticated using (public.is_admin());
+drop policy if exists "Staff view contact messages" on public.contact_messages;
+create policy "Staff view contact messages" on public.contact_messages for select to authenticated using (public.is_staff());
 
 create or replace function public.add_admin_by_email(target_email text)
 returns void language plpgsql security definer set search_path = public, auth
@@ -131,8 +160,57 @@ begin
 end;
 $$;
 
+create or replace function public.add_staff_by_email(target_email text)
+returns void language plpgsql security definer set search_path = public, auth
+as $$
+declare target_id uuid;
+begin
+  if not public.is_admin() then raise exception 'Admin access is required'; end if;
+  select id into target_id from auth.users where lower(email) = lower(target_email);
+  if target_id is null then raise exception 'No account exists for this email'; end if;
+  insert into public.staff (user_id, email) values (target_id, lower(target_email)) on conflict (user_id) do nothing;
+end;
+$$;
+
+create or replace function public.remove_staff(target_user_id uuid)
+returns void language plpgsql security definer set search_path = public
+as $$
+begin
+  if not public.is_admin() then raise exception 'Admin access is required'; end if;
+  delete from public.staff where user_id = target_user_id;
+end;
+$$;
+
+create or replace function public.list_user_accounts()
+returns table (user_id uuid, email text, first_name text, last_name text, created_at timestamptz, is_admin boolean)
+language sql security definer set search_path = public, auth
+as $$
+  select u.id, lower(u.email),
+    coalesce(p.first_name, u.raw_user_meta_data ->> 'first_name', ''),
+    coalesce(p.last_name, u.raw_user_meta_data ->> 'last_name', ''),
+    u.created_at,
+    exists (select 1 from public.admins a where a.user_id = u.id)
+  from auth.users u
+  left join public.profiles p on p.id = u.id
+  order by u.created_at desc;
+$$;
+
+create or replace function public.delete_user_account(target_user_id uuid)
+returns void language plpgsql security definer set search_path = public, auth
+as $$
+begin
+  if not public.is_admin() then raise exception 'Admin access is required'; end if;
+  if target_user_id = auth.uid() then raise exception 'You cannot delete your own account'; end if;
+  delete from auth.users where id = target_user_id;
+end;
+$$;
+
 grant execute on function public.add_admin_by_email(text) to authenticated;
 grant execute on function public.remove_admin(uuid) to authenticated;
+grant execute on function public.add_staff_by_email(text) to authenticated;
+grant execute on function public.remove_staff(uuid) to authenticated;
+grant execute on function public.list_user_accounts() to authenticated;
+grant execute on function public.delete_user_account(uuid) to authenticated;
 
 do $seed$
 begin
