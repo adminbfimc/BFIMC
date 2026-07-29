@@ -152,6 +152,8 @@ begin
 end;
 $seed$;
 
--- After a user signs up, run this once in SQL Editor to grant the first admin:
--- insert into public.admins (user_id, email)
--- select id, lower(email) from auth.users where lower(email) = 'admin@example.com';
+-- Grant the BFIMC administrator account access. This is safe to rerun after the
+-- account has signed up; it does nothing until the matching Auth user exists.
+insert into public.admins (user_id, email)
+select id, lower(email) from auth.users where lower(email) = 'adminbfimc@gmail.com'
+on conflict (user_id) do update set email = excluded.email;

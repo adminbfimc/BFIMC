@@ -16,7 +16,7 @@ Contact, membership, and loan forms post to Node routes. Member accounts use Sup
 
 ## First administrator
 
-After the first user has created an account, run the commented `insert into public.admins ...` statement at the end of [`supabase.sql`](./supabase.sql), replacing `admin@example.com` with that user’s email. That account will be redirected to `/admin` on login and can add or remove other administrators there.
+`adminbfimc@gmail.com` is configured as the initial administrator in [`supabase.sql`](./supabase.sql). Create and verify that account in Supabase Auth, then run the SQL file (or rerun its final administrator statement) in the Supabase SQL Editor. That account will be redirected to `/admin` on login and can add or remove other administrators there.
 
 ## Deploy to Vercel
 
