@@ -5,7 +5,7 @@
   ],
   "functions": {
     "api/index.js": {
-      "includeFiles": ["assets/**", "node-app/views/**"]
+      "includeFiles": "{assets/**,node-app/views/**}"
     }
   }
 }
