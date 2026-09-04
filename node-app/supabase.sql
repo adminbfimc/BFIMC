@@ -86,6 +86,18 @@ create table if not exists public.portfolio_items (
   created_at timestamptz not null default now()
 );
 
+-- Affiliate/partner directory. Logos are public URLs from the existing
+-- bfimc-content storage bucket and are managed by administrators only.
+create table if not exists public.affiliates (
+  id bigint generated always as identity primary key,
+  company_name text not null check (char_length(btrim(company_name)) between 1 and 160),
+  logo_url text not null check (char_length(btrim(logo_url)) > 0),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists affiliates_created_at_idx on public.affiliates (created_at asc, id asc);
+
 create table if not exists public.contact_messages (
   id bigint generated always as identity primary key,
   name text not null,
@@ -98,7 +110,13 @@ create table if not exists public.contact_messages (
 alter table public.admins enable row level security;
 alter table public.staff enable row level security;
 alter table public.portfolio_items enable row level security;
+alter table public.affiliates enable row level security;
 alter table public.contact_messages enable row level security;
+
+drop trigger if exists set_affiliates_updated_at on public.affiliates;
+create trigger set_affiliates_updated_at
+  before update on public.affiliates
+  for each row execute procedure public.set_updated_at();
 
 create or replace function public.is_admin()
 returns boolean language sql stable security definer set search_path = public
@@ -129,6 +147,10 @@ drop policy if exists "Anyone can view portfolio items" on public.portfolio_item
 create policy "Anyone can view portfolio items" on public.portfolio_items for select using (true);
 drop policy if exists "Admins manage portfolio items" on public.portfolio_items;
 create policy "Admins manage portfolio items" on public.portfolio_items for all to authenticated using (public.is_admin()) with check (public.is_admin());
+drop policy if exists "Anyone can view affiliates" on public.affiliates;
+create policy "Anyone can view affiliates" on public.affiliates for select using (true);
+drop policy if exists "Admins manage affiliates" on public.affiliates;
+create policy "Admins manage affiliates" on public.affiliates for all to authenticated using (public.is_admin()) with check (public.is_admin());
 drop policy if exists "Staff manage portfolio items" on public.portfolio_items;
 create policy "Staff manage portfolio items" on public.portfolio_items for all to authenticated using (public.is_staff()) with check (public.is_staff());
 drop policy if exists "Anyone can submit contact messages" on public.contact_messages;
@@ -229,6 +251,29 @@ begin
   end if;
 end;
 $seed$;
+
+-- Preserve the affiliate partners currently displayed on the public site.
+-- New records added from Admin → Affiliate partners are stored alongside them.
+do $seed_affiliates$
+begin
+  if not exists (select 1 from public.affiliates) then
+    insert into public.affiliates (company_name, logo_url) values
+      ('Punchy Palate Gastropub', '/assets/img/affiliates/punchypalategastropub.png'),
+      ('MRJP Gold Trading', '/assets/img/affiliates/MRJPGoldTrading.png'),
+      ('Marojesper Apartments', '/assets/img/affiliates/MarojecperApartmetns.png'),
+      ('MRJP International Immigration Services', '/assets/img/affiliates/MRJPINternationalImmigrationServices.png'),
+      ('Online Shop Hanacraezedic', '/assets/img/affiliates/Online%20Shop%20Hanacraezedic%20.png'),
+      ('Loyosen’s Enterprise', '/assets/img/affiliates/%2BLoyosen%E2%80%99s%20Enterprise.png'),
+      ('Symonah’s House of Apparel', '/assets/img/affiliates/Symonah%E2%80%99s%20House%20of%20Apparel.png'),
+      ('Skye Dental Clinic', '/assets/img/affiliates/Skye%20Dental%20Clinic.png'),
+      ('Dr. Carame Porification Dental Clinic', '/assets/img/BFI_logo.png'),
+      ('Dr. Brenda S. Cirilo Family Physician', '/assets/img/affiliates/Dr.%20Brenda%20S.%20CiriloFamily%20Physician.png'),
+      ('General Pediatrician Clinic', '/assets/img/affiliates/General%20Pediatrician%20Clinic.png'),
+      ('Atty. Cita Fango-ok Pakeo', '/assets/img/affiliates/Atty.%20Cita%20Fango-ok%20Pakeo%20%20.png'),
+      ('Office of the Vice Mayor', '/assets/img/BFI_logo.png');
+  end if;
+end;
+$seed_affiliates$;
 
 -- Grant the BFIMC administrator account access. This is safe to rerun after the
 -- account has signed up; it does nothing until the matching Auth user exists.

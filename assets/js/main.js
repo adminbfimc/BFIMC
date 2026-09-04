@@ -27,6 +27,23 @@
     el.addEventListener('scroll', listener)
   }
 
+  /* Keep decorative background videos playing without exposing controls */
+  const backgroundVideos = document.querySelectorAll('video.back_video');
+  const resumeBackgroundVideo = (video) => {
+    video.muted = true;
+    video.controls = false;
+    video.play().catch(() => {});
+  };
+  backgroundVideos.forEach((video) => {
+    video.addEventListener('pause', () => window.setTimeout(() => resumeBackgroundVideo(video), 0));
+    video.addEventListener('ended', () => resumeBackgroundVideo(video));
+    video.addEventListener('loadeddata', () => resumeBackgroundVideo(video));
+    resumeBackgroundVideo(video);
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) backgroundVideos.forEach(resumeBackgroundVideo);
+  });
+
   /* Navbar links active state on scroll */
   let navbarlinks = select('#navbar .home-page-link', true)
   const navbarlinksActive = () => {
@@ -208,8 +225,72 @@
 
   /* Initiate portfolio lightbox */
   const portfolioLightbox = GLightbox({
-    selector: '.portfolio-lightbox'
+    selector: '.portfolio-lightbox, .affiliate-lightbox'
   });
+
+  /* BorderGlow-style directional edge light for portfolio cards. */
+  const portfolioGlowCards = document.querySelectorAll('.portfolio .portfolio-wrap');
+  if (window.matchMedia('(hover: hover)').matches && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    portfolioGlowCards.forEach((card, index) => {
+      card.classList.add('portfolio-glow-sweep');
+      card.style.setProperty('--portfolio-sweep-delay', `${index * 90}ms`);
+      card.addEventListener('pointermove', (event) => {
+        const bounds = card.getBoundingClientRect();
+        const x = event.clientX - bounds.left - bounds.width / 2;
+        const y = event.clientY - bounds.top - bounds.height / 2;
+        const angle = (Math.atan2(y, x) * 180 / Math.PI + 90 + 360) % 360;
+        const edgeDistance = Math.min(event.clientX - bounds.left, bounds.right - event.clientX, event.clientY - bounds.top, bounds.bottom - event.clientY);
+        const strength = Math.max(.48, Math.min(1, 1.18 - edgeDistance / 150));
+        card.style.setProperty('--portfolio-glow-angle', `${angle}deg`);
+        card.style.setProperty('--portfolio-glow-strength', strength.toFixed(2));
+      });
+      card.addEventListener('pointerleave', () => card.style.setProperty('--portfolio-glow-strength', '0'));
+    });
+  }
+
+  /* Public partner gallery is sourced from the affiliate records in Supabase. */
+  const publicAffiliateGrid = document.querySelector('[data-public-affiliate-grid]');
+  if (publicAffiliateGrid) {
+    fetch('/api/affiliates').then((response) => response.ok ? response.json() : null).then((data) => {
+      if (!data || !Array.isArray(data.affiliates)) return;
+      publicAffiliateGrid.replaceChildren();
+      data.affiliates.forEach((affiliate) => {
+        const card = document.createElement('article');
+        card.className = 'affiliate-card palette-sand';
+        const link = document.createElement('a');
+        link.className = 'affiliate-image-link affiliate-lightbox';
+        link.href = affiliate.logo_url;
+        link.dataset.gallery = 'affiliateGallery';
+        const art = document.createElement('div'); art.className = 'affiliate-art';
+        const image = document.createElement('img'); image.src = affiliate.logo_url; image.alt = `${affiliate.company_name} logo`;
+        const view = document.createElement('span'); view.innerHTML = 'View image <i class="bi bi-arrows-angle-expand"></i>';
+        art.append(image, view); link.append(art);
+        const copy = document.createElement('div'); copy.className = 'affiliate-copy';
+        const label = document.createElement('span'); label.textContent = 'Affiliate partner';
+        const title = document.createElement('h3'); title.textContent = affiliate.company_name;
+        copy.append(label, title); card.append(link, copy); publicAffiliateGrid.append(card);
+      });
+      if (!data.affiliates.length) publicAffiliateGrid.innerHTML = '<p class="admin-empty">No affiliate partners are listed yet.</p>';
+      document.querySelectorAll('[data-affiliate-total]').forEach((total) => { total.textContent = data.count; });
+      portfolioLightbox.reload();
+    }).catch(() => {});
+  }
+
+  /* Reveal key homepage content as it enters the viewport */
+  const revealTargets = document.querySelectorAll(
+    '.purpose-primary, .secondary-objectives, .history-timeline article, .family-grid article, .affiliate-card, .about .vision-and-mission > .row > .container'
+  );
+  if ('IntersectionObserver' in window && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const revealObserver = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        entry.target.classList.toggle('is-visible', entry.isIntersecting);
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -30px' });
+    revealTargets.forEach((target) => {
+      target.classList.add('scroll-reveal');
+      revealObserver.observe(target);
+    });
+  }
 
   /* Portfolio details slider */
   new Swiper('.portfolio-details-slider', {
@@ -247,49 +328,13 @@
     AOS.init({
       duration: 1000,
       easing: "ease-in-out",
-      once: true,
-      mirror: false
+      once: false,
+      mirror: true
     });
   });
 
   /* Initiate Pure Counter */
   new PureCounter();
-
-  /* Homepage goal picker */
-  const goalOptions = select('.goal-option', true);
-  const recommendationCopy = select('.recommendation-copy');
-  const recommendationLink = select('.recommendation-link');
-  const recommendations = {
-    membership: {
-      copy: 'Start a membership application and take your first step toward member benefits.',
-      label: 'Start application',
-      href: '/membership-form'
-    },
-    savings: {
-      copy: 'Explore savings options with our team and choose a plan that suits your next goal.',
-      label: 'Explore services',
-      href: '/services'
-    },
-    loan: {
-      copy: 'Review loan options, then share your plans through our simple application form.',
-      label: 'View loan options',
-      href: '/loan-form'
-    }
-  };
-
-  goalOptions.forEach((option) => {
-    option.addEventListener('click', () => {
-      const choice = recommendations[option.dataset.goal];
-      if (!choice || !recommendationCopy || !recommendationLink) return;
-      goalOptions.forEach((item) => {
-        item.classList.toggle('is-selected', item === option);
-        item.setAttribute('aria-pressed', item === option ? 'true' : 'false');
-      });
-      recommendationCopy.textContent = choice.copy;
-      recommendationLink.href = choice.href;
-      recommendationLink.innerHTML = `${choice.label} <i class="bi bi-arrow-up-right"></i>`;
-    });
-  });
 
   /* Login and sign-up tabs */
   const accountPage = select('.account-page[data-auth-mode]');
