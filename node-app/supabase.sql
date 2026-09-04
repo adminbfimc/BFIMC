@@ -81,13 +81,13 @@ create table if not exists public.portfolio_items (
   title text not null,
   caption text not null,
   image_url text not null,
-  alt_text text not null default 'BFIMC portfolio image',
+  alt_text text not null default 'BFIMPC portfolio image',
   sort_order integer not null default 0,
   created_at timestamptz not null default now()
 );
 
 -- Affiliate/partner directory. Logos are public URLs from the existing
--- bfimc-content storage bucket and are managed by administrators only.
+-- bfimpc-content storage bucket and are managed by administrators only.
 create table if not exists public.affiliates (
   id bigint generated always as identity primary key,
   company_name text not null check (char_length(btrim(company_name)) between 1 and 160),
@@ -128,13 +128,13 @@ as $$ select exists (select 1 from public.staff where user_id = auth.uid()) $$;
 
 -- Public images uploaded by administrators for portfolio content.
 insert into storage.buckets (id, name, public)
-values ('bfimc-content', 'bfimc-content', true)
+values ('bfimpc-content', 'bfimpc-content', true)
 on conflict (id) do update set public = true;
 
-drop policy if exists "Anyone can view BFIMC content images" on storage.objects;
-create policy "Anyone can view BFIMC content images" on storage.objects for select using (bucket_id = 'bfimc-content');
-drop policy if exists "Admins upload BFIMC content images" on storage.objects;
-create policy "Admins upload BFIMC content images" on storage.objects for insert to authenticated with check (bucket_id = 'bfimc-content' and public.is_admin());
+drop policy if exists "Anyone can view BFIMPC content images" on storage.objects;
+create policy "Anyone can view BFIMPC content images" on storage.objects for select using (bucket_id = 'bfimpc-content');
+drop policy if exists "Admins upload BFIMPC content images" on storage.objects;
+create policy "Admins upload BFIMPC content images" on storage.objects for insert to authenticated with check (bucket_id = 'bfimpc-content' and public.is_admin());
 
 drop policy if exists "Admins can view their own role" on public.admins;
 drop policy if exists "Admins can view administrators" on public.admins;
@@ -238,16 +238,16 @@ do $seed$
 begin
   if not exists (select 1 from public.portfolio_items) then
     insert into public.portfolio_items (title, caption, image_url, alt_text, sort_order) values
-      ($$The BFIMC Beginning$$, $$Small beginnings, moving forward together and building a better future for generations to nurture.$$, $$/assets/img/portfolio/image-2.jpg$$, $$BFIMC early community moment$$, 1),
-      ($$Five Years Together$$, $$Brilliant ideas and lasting friendships as BFIMC celebrated its fifth year.$$, $$/assets/img/portfolio/image-1.jpg$$, $$BFIMC anniversary gathering$$, 2),
-      ($$Lucky Number Eight$$, $$Growing stronger, building dreams, and creating happy memories together.$$, $$/assets/img/portfolio/image-3.jpg$$, $$BFIMC Lucky Number Eight group$$, 3),
-      ($$Dreaming Into Doing$$, $$Every meaningful goal begins with the choice to take action.$$, $$/assets/img/portfolio/image-4.jpg$$, $$BFIMC members at an event$$, 4),
-      ($$Going Further Together$$, $$We move farther when we show up for one another.$$, $$/assets/img/portfolio/image-5.jpg$$, $$BFIMC community activity$$, 5),
-      ($$Shared Moments$$, $$Making space for connection, celebration, and community.$$, $$/assets/img/portfolio/image-6.jpg$$, $$BFIMC shared moment$$, 6),
-      ($$Growing Together$$, $$One cooperative, many stories, and a shared future.$$, $$/assets/img/portfolio/image-7.jpg$$, $$BFIMC members together$$, 7),
-      ($$Building Dreams$$, $$Working side by side to make family goals feel possible.$$, $$/assets/img/portfolio/image-8.jpg$$, $$BFIMC community gathering$$, 8),
-      ($$Stronger Communities$$, $$Progress is more meaningful when it is shared.$$, $$/assets/img/portfolio/image-9.jpg$$, $$BFIMC group milestone$$, 9),
-      ($$Family Legacy$$, $$Creating a future the next generation can be proud to nurture.$$, $$/assets/img/portfolio/image-10.jpg$$, $$BFIMC family legacy moment$$, 10);
+      ($$The BFIMPC Beginning$$, $$Small beginnings, moving forward together and building a better future for generations to nurture.$$, $$/assets/img/portfolio/image-2.jpg$$, $$BFIMPC early community moment$$, 1),
+      ($$Five Years Together$$, $$Brilliant ideas and lasting friendships as BFIMPC celebrated its fifth year.$$, $$/assets/img/portfolio/image-1.jpg$$, $$BFIMPC anniversary gathering$$, 2),
+      ($$Lucky Number Eight$$, $$Growing stronger, building dreams, and creating happy memories together.$$, $$/assets/img/portfolio/image-3.jpg$$, $$BFIMPC Lucky Number Eight group$$, 3),
+      ($$Dreaming Into Doing$$, $$Every meaningful goal begins with the choice to take action.$$, $$/assets/img/portfolio/image-4.jpg$$, $$BFIMPC members at an event$$, 4),
+      ($$Going Further Together$$, $$We move farther when we show up for one another.$$, $$/assets/img/portfolio/image-5.jpg$$, $$BFIMPC community activity$$, 5),
+      ($$Shared Moments$$, $$Making space for connection, celebration, and community.$$, $$/assets/img/portfolio/image-6.jpg$$, $$BFIMPC shared moment$$, 6),
+      ($$Growing Together$$, $$One cooperative, many stories, and a shared future.$$, $$/assets/img/portfolio/image-7.jpg$$, $$BFIMPC members together$$, 7),
+      ($$Building Dreams$$, $$Working side by side to make family goals feel possible.$$, $$/assets/img/portfolio/image-8.jpg$$, $$BFIMPC community gathering$$, 8),
+      ($$Stronger Communities$$, $$Progress is more meaningful when it is shared.$$, $$/assets/img/portfolio/image-9.jpg$$, $$BFIMPC group milestone$$, 9),
+      ($$Family Legacy$$, $$Creating a future the next generation can be proud to nurture.$$, $$/assets/img/portfolio/image-10.jpg$$, $$BFIMPC family legacy moment$$, 10);
   end if;
 end;
 $seed$;
@@ -275,8 +275,8 @@ begin
 end;
 $seed_affiliates$;
 
--- Grant the BFIMC administrator account access. This is safe to rerun after the
+-- Grant the BFIMPC administrator account access. This is safe to rerun after the
 -- account has signed up; it does nothing until the matching Auth user exists.
 insert into public.admins (user_id, email)
-select id, lower(email) from auth.users where lower(email) = 'adminbfimc@gmail.com'
+select id, lower(email) from auth.users where lower(email) = 'adminbfimpc@gmail.com'
 on conflict (user_id) do update set email = excluded.email;

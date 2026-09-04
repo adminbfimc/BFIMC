@@ -1,12 +1,12 @@
-# BFIMC Node app
+# BFIMPC Node app
 
-This folder contains the Node.js version of the BFIMC website. Its HTML page fragments live in `views/`, and it serves the existing static assets from `../assets/`.
+This folder contains the Node.js version of the BFIMPC website. Its HTML page fragments live in `views/`, and it serves the existing static assets from `../assets/`.
 
 ## Run it
 
 1. In this folder, run `npm install`.
 2. Copy `.env.example` to `.env`, then supply the Supabase URL and anon key along with any SMTP settings.
-3. In Supabase Dashboard, open **SQL Editor** and run [`supabase.sql`](./supabase.sql). This also creates the `bfimc-content` Storage bucket used when administrators upload images from their device.
+3. In Supabase Dashboard, open **SQL Editor** and run [`supabase.sql`](./supabase.sql). This also creates the `bfimpc-content` Storage bucket used when administrators upload images from their device.
 4. In **Authentication → Email Templates → Confirm signup**, paste [`supabase-email-template.html`](./supabase-email-template.html). It provides both an OTP code and a confirmation link. Add `http://localhost:3000/auth/callback` and your deployed `/auth/callback` URL under **Authentication → URL Configuration → Redirect URLs**.
 5. Run `npm start` and open `http://localhost:3000`.
 
@@ -16,7 +16,7 @@ Contact, membership, and loan forms post to Node routes. Member accounts use Sup
 
 ## First administrator
 
-`adminbfimc@gmail.com` is configured as the initial administrator in [`supabase.sql`](./supabase.sql). Create and verify that account in Supabase Auth, then run the SQL file (or rerun its final administrator statement) in the Supabase SQL Editor. That account will be redirected to `/admin` on login and can add or remove other administrators there.
+`adminbfimpc@gmail.com` is configured as the initial administrator in [`supabase.sql`](./supabase.sql). Create and verify that account in Supabase Auth, then run the SQL file (or rerun its final administrator statement) in the Supabase SQL Editor. That account will be redirected to `/admin` on login and can add or remove other administrators there.
 
 ## Deploy to Vercel
 

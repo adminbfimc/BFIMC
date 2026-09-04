@@ -1,8 +1,8 @@
 {
-  "name": "bfimc-node",
+  "name": "bfimpc-node",
   "version": "1.0.0",
   "private": true,
-  "description": "Node.js runtime for the existing BFIMC website",
+  "description": "Node.js runtime for the existing BFIMPC website",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

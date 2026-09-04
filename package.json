@@ -1,8 +1,8 @@
 {
-  "name": "bfimc",
+  "name": "bfimpc",
   "version": "1.0.0",
   "private": true,
-  "description": "BFIMC Node.js website",
+  "description": "BFIMPC Node.js website",
   "scripts": {
     "build": "node --check node-app/server.js",
     "start": "node node-app/server.js",
