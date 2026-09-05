@@ -1,80 +1,14 @@
 <section id="membership-form" class="membership-form">
     <div class="navigation-background"></div>
-    <div id="cta" class="cta">
-        <div class="container" data-aos="zoom-in">
-            <h3>Become a member now</h3>
-        </div>
+    <div id="cta" class="cta"><div class="container" data-aos="zoom-in"><h3>Membership ID application</h3></div></div>
+    <div class="container membership-application-shell" data-aos="fade-up">
+        <form action="forms/membership.php" method="post" enctype="multipart/form-data" class="membership-application-form" role="form">
+            <div class="membership-form-intro"><p class="section-kicker">Member record update</p><h1>Tell us about yourself.</h1><p>Please complete the information below exactly as it should appear on your membership record. Fields marked <b>*</b> are required.</p></div>
+            <section class="membership-form-section"><h2>Personal information</h2><div class="membership-fields three-columns"><label>Last name *<input name="last_name" required></label><label>First name *<input name="first_name" required></label><label>Middle name<input name="middle_name"></label></div><div class="membership-fields address-fields"><label>House no. / street *<input name="street" required></label><label>Barangay *<input name="barangay" required></label><label>Municipality *<input name="municipality" required></label><label>Province *<input name="province" required></label><label>Zip code *<input name="zip_code" inputmode="numeric" required></label></div><div class="membership-fields three-columns"><label>Birthday *<input name="birthdate" type="date" required></label><label>Sex *<select name="sex" required><option value="" selected disabled>Select</option><option>Male</option><option>Female</option></select></label><label>TIN no. / SSS no.<input name="tin_sss"></label></div><div class="membership-fields three-columns"><label>Marital status<input name="marital_status"></label><label>Phone no. *<input name="phone" type="tel" required></label><label>Email address *<input name="email" type="email" required></label></div><div class="membership-fields"><label>Occupation and employer<input name="occupation_employer"></label><label>Name of spouse, if married<input name="spouse_name"></label><label>Spouse birthday<input name="spouse_birthdate" type="date"></label></div></section>
+            <section class="membership-form-section"><h2>Emergency contact</h2><div class="membership-fields three-columns"><label>Last name *<input name="emergency_last_name" required></label><label>First name *<input name="emergency_first_name" required></label><label>Middle name<input name="emergency_middle_name"></label></div><div class="membership-fields address-fields"><label>House no. / street *<input name="emergency_street" required></label><label>Barangay *<input name="emergency_barangay" required></label><label>Municipality *<input name="emergency_municipality" required></label><label>Province *<input name="emergency_province" required></label><label>Zip code *<input name="emergency_zip_code" inputmode="numeric" required></label></div><div class="membership-fields"><label>Phone no. *<input name="emergency_phone" type="tel" required></label></div></section>
+            <section class="membership-form-section"><h2>Beneficiaries</h2><div class="membership-beneficiary-grid"><fieldset><legend>Primary beneficiary</legend><div class="membership-fields"><label>Name<input name="primary_beneficiary_name"></label><label>Date of birth<input name="primary_beneficiary_birthdate" type="date"></label><label>Relationship<input name="primary_beneficiary_relationship"></label></div></fieldset><fieldset><legend>Secondary beneficiary</legend><div class="membership-fields"><label>Name<input name="secondary_beneficiary_name"></label><label>Date of birth<input name="secondary_beneficiary_birthdate" type="date"></label><label>Relationship<input name="secondary_beneficiary_relationship"></label></div></fieldset></div></section>
+            <section class="membership-form-section membership-photo-section"><div><h2>2×2 photo</h2><p>Upload your latest 2×2 ID photo. JPEG or PNG only, up to 5 MB.</p></div><label class="membership-photo-upload"><span class="membership-photo-placeholder"><i class="bi bi-camera"></i><span>Choose 2×2 photo *</span></span><img class="membership-photo-preview" alt="Selected 2×2 photo preview" hidden><input name="photo" type="file" accept="image/jpeg,image/png" required></label></section>
+            <button class="auth-submit membership-submit" type="submit">Submit membership application <i class="bi bi-arrow-right"></i></button>
+        </form>
     </div>
-    <div class="container" data-aos="fade-up">
-        <div class="vh-100 gradient-custom">
-            <div class="container" data-aos="fade-up">
-
-                <div class="row mt-5 ">
-                    <div class="col-lg-4 contact-information">
-                        <div class="info">
-                            <div class="info-loan">
-                                <h2>How to become a member?</h2>
-                                <ul>
-                                    <li><i class="ri-check-double-line"></i> 1. </li>
-                                    <li><i class="ri-check-double-line"></i> 2. </li>
-                                    <li><i class="ri-check-double-line"></i> 3. </li>
-                                    <li><i class="ri-check-double-line"></i> 4. </li>
-                                    <li><i class="ri-check-double-line"></i> 5. </li>
-                                </ul>
-                            </div>
-                            <div class="info-loan">
-                                <h2>Benefits</h2>
-                                <ul>
-                                    <li><i class="ri-check-double-line"></i> 1. </li>
-                                    <li><i class="ri-check-double-line"></i> 2. </li>
-                                    <li><i class="ri-check-double-line"></i> 3. </li>
-
-                                </ul>
-                            </div>
-
-                        </div>
-
-                    </div>
-
-                    <div class="col-lg-8 mt-5 mt-lg-0 membership-form-container">
-                        <form action="forms/membership.php" method="post" class="loan_form mt-4" role="form">
-                            <div class="row">
-                                <div class="col-md-6 form-group">
-                                    <label for="name">Last Name</label>
-                                    <input type="text" name="last_name" class="form-control" id="last_name" required>
-                                </div>
-                                <div class="col-md-6 form-group">
-                                    <label for="name">First Name</label>
-                                    <input type="text" name="first_name" class="form-control" id="first_name" required>
-                                </div>
-                                <div class="col-md-6 form-group">
-                                    <label for="name">Middle Name</label>
-                                    <input type="text" name="middle_name" class="form-control" id="middle_name" required>
-                                </div>
-                            </div>
-                            <div class="row">
-
-                                <div class="col-md-6 form-group mt-3 mt-md-0">
-                                    <label for="email">Email</label>
-                                    <input type="email" class="form-control" name="email" id="email" required>
-                                </div>
-                                <div class="col-md-6 form-group mt-3 mt-md-0">
-                                    <label for="email">Mobile Number</label>
-                                    <input type="number" class="form-control" name="mobile_number" id="mobile_number" required>
-                                </div>
-                                <div class="col-md-6 form-group mt-3 mt-md-0">
-                                    <label for="email">Complete Address</label>
-                                    <input type="text" class="form-control" name="address" id="email" required>
-                                </div>
-                            </div>
-                            <div class="text-center">
-                                <button>Join now</button>
-                            </div>
-                        </form>
-
-                    </div>
-
-                </div>
-            </div>
-        </div>    </div>
 </section>

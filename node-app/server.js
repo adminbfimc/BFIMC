@@ -3,6 +3,8 @@ const nodemailer = require('nodemailer');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const os = require('os');
+const { execFileSync } = require('child_process');
 
 loadEnv(path.join(__dirname, '.env'));
 
@@ -36,6 +38,7 @@ const routes = {
 for (const [url, page] of Object.entries(routes)) {
   app.get(url, async (req, res) => {
     const user = await sessionUser(req, res);
+    if (page.page === 'membership_form' && !user) return res.redirect('/auth?mode=login&status=membership-login');
     if (user?.isAdmin) return res.redirect('/admin');
     if (user?.isStaff) return res.redirect('/staff/content');
     renderPage(res, page, req.query.status, user);
@@ -62,15 +65,18 @@ app.get('/admin/inbox', requireAdmin, async (req, res) => renderAdmin(res, req.u
 app.get('/admin/accounts', requireAdmin, async (req, res) => renderAdmin(res, req.user, req.query.status, 'accounts'));
 app.get('/admin/users', requireAdmin, async (req, res) => renderAdmin(res, req.user, req.query.status, 'users'));
 app.get('/admin/affiliates', requireAdmin, async (req, res) => renderAdmin(res, req.user, req.query.status, 'affiliates'));
+app.get('/admin/memberships', requireAdmin, async (req, res) => renderMembershipApplications(res, req.user, req.query.status));
+app.get('/admin/memberships/:id', requireAdmin, renderMembershipApplicationPreview);
+app.get('/admin/memberships/:id/photo', requireAdmin, handleMembershipPhoto);
+app.get('/admin/memberships/:id/export.docx', requireAdmin, handleMembershipExport);
+app.post('/admin/memberships/:id/delete', requireAdmin, handleMembershipApplicationDelete);
 app.get('/admin/staff', requireAdmin, (req, res) => res.redirect('/admin/accounts'));
 app.get('/staff', requireStaff, (req, res) => res.redirect('/staff/content'));
 app.get('/staff/content', requireStaff, async (req, res) => renderAdmin(res, req.user, req.query.status, 'content', true));
 app.get('/staff/inbox', requireStaff, async (req, res) => renderAdmin(res, req.user, req.query.status, 'inbox', true));
 
 app.post('/contact', handleSubmission('contact', ['name', 'email', 'subject', 'message']));
-app.post('/membership-application', handleSubmission('membership application', [
-  'last_name', 'first_name', 'middle_name', 'email', 'mobile_number', 'address'
-]));
+app.post('/membership-application', requireUser, express.raw({ type: 'multipart/form-data', limit: '6mb' }), parsePortfolioUpload, handleMembershipApplication);
 app.post('/loan-application', handleSubmission('loan application', [
   'last_name', 'first_name', 'middle_name', 'email', 'mobile_number', 'address', 'need'
 ]));
@@ -84,14 +90,19 @@ app.post('/forgot-password', handleForgotPassword);
 app.post('/reset-password', handleResetPassword);
 app.post('/verify-email', handleVerifyEmail);
 app.post('/verify-email/resend', handleResendVerification);
-app.post('/admin/portfolio', requireStaff, express.raw({ type: 'multipart/form-data', limit: '5mb' }), parsePortfolioUpload, handlePortfolioSave);
+app.post('/admin/portfolio', requireStaff, express.raw({ type: 'multipart/form-data', limit: '20mb' }), parsePortfolioUpload, handlePortfolioSave);
 app.post('/admin/portfolio/:id/delete', requireStaff, handlePortfolioDelete);
+app.post('/admin/legal-documents', requireAdmin, express.raw({ type: 'multipart/form-data', limit: '20mb' }), parsePortfolioUpload, handleLegalDocumentSave);
+app.post('/admin/legal-documents/:id/delete', requireAdmin, handleLegalDocumentDelete);
 app.post('/admin/affiliates', requireAdmin, express.raw({ type: 'multipart/form-data', limit: '5mb' }), parsePortfolioUpload, handleAffiliateSave);
 app.post('/admin/affiliates/:id/delete', requireAdmin, handleAffiliateDelete);
 app.get('/api/affiliates', async (req, res) => {
   const { data, error } = await supabaseRequest('/rest/v1/affiliates?select=id,company_name,logo_url&order=created_at.asc');
   if (error) return res.status(503).json({ error: 'Affiliates are temporarily unavailable.' });
   res.json({ affiliates: Array.isArray(data) ? data : [], count: Array.isArray(data) ? data.length : 0 });
+});
+app.get('/api/portfolio-fragment', async (req, res) => {
+  res.type('html').send(await portfolioFragment());
 });
 app.post('/admin/admins', requireAdmin, handleAdminAdd);
 app.post('/admin/admins/:id/delete', requireAdmin, handleAdminDelete);
@@ -112,14 +123,51 @@ if (require.main === module) {
 }
 
 async function renderPage(res, { page, title }, status, user) {
-  const message = status === 'sent'
+  const message = status === 'sent' || status === 'membership-sent'
     ? '<div class="container pt-5 mt-5"><div class="alert alert-success">Your submission has been sent successfully.</div></div>'
-    : status === 'error'
+    : status === 'error' || status === 'membership-error'
       ? '<div class="container pt-5 mt-5"><div class="alert alert-danger">We could not send your submission. Please try again later.</div></div>'
       : '';
 
-  const content = page === 'portfolio' ? await portfolioFragment() : fragment(page);
-  res.type('html').send(`${header(title, user)}${message}${content}${footer()}`);
+  let content = page === 'portfolio' ? await portfolioFragment() : fragment(page);
+  if (page === 'membership') {
+    content = content
+      .replace('{{MEMBERSHIP_JOIN_URL}}', user ? '/membership-form' : '/auth?mode=login')
+      .replace('{{MEMBERSHIP_JOIN_LABEL}}', user ? 'Join now' : 'Log in or sign up first');
+  }
+  const document = `${header(title, user)}${message}${content}${footer()}`;
+  res.type('html').send(page === 'portfolio' ? document.replace('</body>', `${portfolioRealtimeScript()}</body>`) : document);
+}
+
+function portfolioRealtimeScript() {
+  if (!supabaseConfigured()) return '';
+  const url = JSON.stringify(supabaseUrl).replace(/</g, '\\u003c');
+  const key = JSON.stringify(supabaseAnonKey).replace(/</g, '\\u003c');
+  return `<script type="module">
+    import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+    const realtimeClient = createClient(${url}, ${key});
+    let refreshTimer;
+    const refreshPortfolio = () => {
+      window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(async () => {
+        try {
+          const response = await fetch('/api/portfolio-fragment', { credentials: 'same-origin' });
+          if (!response.ok) return;
+          const current = document.querySelector('#portfolio');
+          if (!current) return;
+          current.outerHTML = await response.text();
+          window.bfimpcRefreshPortfolioUi?.();
+        } catch (_) {}
+      }, 250);
+    };
+    const channel = realtimeClient.channel('public-portfolio-updates')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'portfolio_items' }, refreshPortfolio)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'portfolio_item_images' }, refreshPortfolio)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'legal_documents' }, refreshPortfolio)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'legal_document_images' }, refreshPortfolio)
+      .subscribe();
+    window.addEventListener('pagehide', () => realtimeClient.removeChannel(channel), { once: true });
+  </script>`;
 }
 
 function handleSubmission(type, fields) {
@@ -137,6 +185,21 @@ function handleSubmission(type, fields) {
       res.redirect(destinationFor(type, 'error'));
     }
   };
+}
+
+async function handleMembershipApplication(req, res) {
+  const required = ['last_name', 'first_name', 'street', 'barangay', 'municipality', 'province', 'zip_code', 'birthdate', 'sex', 'phone', 'email', 'emergency_last_name', 'emergency_first_name', 'emergency_street', 'emergency_barangay', 'emergency_municipality', 'emergency_province', 'emergency_zip_code', 'emergency_phone'];
+  if (req.uploadError || required.some((field) => !String(req.body[field] || '').trim()) || !isEmail(req.body.email) || !req.file || !['image/jpeg', 'image/png'].includes(req.file.mimetype) || req.file.buffer.length > 5 * 1024 * 1024) return res.redirect('/membership-form?status=membership-error');
+  const upload = await uploadMembershipPhoto(req.file, req.user.accessToken, req.user.id);
+  if (upload.error) return res.redirect('/membership-form?status=membership-error');
+  const fields = ['last_name', 'first_name', 'middle_name', 'street', 'barangay', 'municipality', 'province', 'zip_code', 'birthdate', 'sex', 'tin_sss', 'marital_status', 'spouse_name', 'spouse_birthdate', 'phone', 'email', 'occupation_employer', 'emergency_last_name', 'emergency_first_name', 'emergency_middle_name', 'emergency_street', 'emergency_barangay', 'emergency_municipality', 'emergency_province', 'emergency_zip_code', 'emergency_phone', 'primary_beneficiary_name', 'primary_beneficiary_birthdate', 'primary_beneficiary_relationship', 'secondary_beneficiary_name', 'secondary_beneficiary_birthdate', 'secondary_beneficiary_relationship'];
+  const values = Object.fromEntries(fields.map((field) => [field, String(req.body[field] || '').trim()]));
+  for (const field of ['spouse_birthdate', 'primary_beneficiary_birthdate', 'secondary_beneficiary_birthdate']) if (!values[field]) values[field] = null;
+  values.user_id = req.user.id;
+  values.email = normalizeEmail(values.email);
+  values.photo_path = upload.path;
+  const { error } = await supabaseRequest('/rest/v1/membership_applications', { method: 'POST', token: req.user.accessToken, body: values });
+  res.redirect(`/membership-form?status=${error ? 'membership-error' : 'membership-sent'}`);
 }
 
 async function saveContactMessage({ name, email, subject, message }) {
@@ -214,6 +277,7 @@ function renderAuth(res, mode = 'login', status, values = {}) {
     reset: 'Your password has been updated. Please log in.',
     confirm: 'Check your email to confirm your account, then log in.',
     unverified: 'Your email has not been verified yet. Enter the code we sent to continue.',
+    'membership-login': 'Log in or create an account before starting your membership application.',
     config: 'Account service is not configured yet. Please try again later.',
     'signup-error': values.signupError || 'We could not create your account. Please try again.'
   };
@@ -421,16 +485,20 @@ async function handlePortfolioSave(req, res) {
   if (req.uploadError) return res.redirect('/admin/content?status=portfolio-error');
   const { id, title, caption, image_url, alt_text, sort_order } = req.body;
   let finalImageUrl = String(image_url || '').trim();
-  if (req.file) {
-    const uploadResult = await uploadPortfolioImage(req.file, req.user.accessToken);
+  const uploadedImages = [];
+  for (const file of req.files || []) {
+    const uploadResult = await uploadPortfolioImage(file, req.user.accessToken);
     if (uploadResult.error) return res.redirect('/admin/content?status=portfolio-error');
-    finalImageUrl = uploadResult.url;
+    uploadedImages.push(uploadResult.url);
   }
+  if (uploadedImages.length) finalImageUrl = uploadedImages[0];
   if (![title, caption, finalImageUrl].every((value) => String(value || '').trim())) return res.redirect('/admin/content?status=portfolio-error');
   const values = { title: String(title).trim(), caption: String(caption).trim(), image_url: finalImageUrl, alt_text: String(alt_text || 'BFIMPC portfolio image').trim(), sort_order: Number(sort_order) || 0 };
   const result = id
     ? await supabase(req.user.accessToken).from('portfolio_items').update(values).eq('id', id)
-    : await supabase(req.user.accessToken).from('portfolio_items').insert(values);
+    : await supabaseRequest('/rest/v1/portfolio_items', { method: 'POST', token: req.user.accessToken, body: values, returning: true });
+  const portfolioItemId = id || (Array.isArray(result.data) ? result.data[0]?.id : result.data?.id);
+  if (!result.error && portfolioItemId && uploadedImages.length > 1) await supabase(req.user.accessToken).from('portfolio_item_images').insert(uploadedImages.slice(1).map((url) => ({ portfolio_item_id: portfolioItemId, image_url: url, alt_text: values.alt_text })));
   res.redirect(`/admin/content?status=${result.error ? 'portfolio-error' : 'portfolio-saved'}`);
 }
 
@@ -439,7 +507,7 @@ function parsePortfolioUpload(req, res, next) {
   const boundary = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(req.headers['content-type'] || '')?.[1] || /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(req.headers['content-type'] || '')?.[2];
   if (!boundary) { req.uploadError = 'Invalid upload form.'; return next(); }
   const fields = {};
-  let image;
+  const images = [];
   for (const rawPart of req.body.toString('latin1').split(`--${boundary}`)) {
     const divider = rawPart.indexOf('\r\n\r\n');
     if (divider < 0) continue;
@@ -452,11 +520,12 @@ function parsePortfolioUpload(req, res, next) {
     if (filename !== undefined && filename) {
       const mimetype = /content-type:\s*([^\r\n]+)/i.exec(headers)?.[1]?.trim().toLowerCase();
       if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(mimetype)) { req.uploadError = 'Only JPEG, PNG, WebP, and GIF images are allowed.'; return next(); }
-      image = { mimetype, buffer: Buffer.from(value, 'latin1') };
+      images.push({ mimetype, buffer: Buffer.from(value, 'latin1') });
     } else fields[name] = Buffer.from(value, 'latin1').toString('utf8');
   }
   req.body = fields;
-  req.file = image;
+  req.files = images;
+  req.file = images[0];
   next();
 }
 
@@ -475,9 +544,60 @@ async function uploadPortfolioImage(file, accessToken) {
   } catch (error) { return { error }; }
 }
 
+async function uploadMembershipPhoto(file, accessToken, userId) {
+  const extension = file.mimetype === 'image/png' ? 'png' : 'jpg';
+  const objectPath = `${userId}/${crypto.randomUUID()}.${extension}`;
+  try {
+    const response = await fetch(`${supabaseUrl}/storage/v1/object/membership-photos/${objectPath}`, {
+      method: 'POST',
+      headers: { apikey: supabaseAnonKey, Authorization: `Bearer ${accessToken}`, 'Content-Type': file.mimetype, 'x-upsert': 'false' },
+      body: file.buffer
+    });
+    return response.ok ? { path: objectPath, error: null } : { error: new Error('Photo upload failed.') };
+  } catch (error) { return { error }; }
+}
+
 async function handlePortfolioDelete(req, res) {
   const { error } = await supabase(req.user.accessToken).from('portfolio_items').delete().eq('id', req.params.id);
   res.redirect(`/admin/content?status=${error ? 'portfolio-error' : 'portfolio-deleted'}`);
+}
+
+async function handleLegalDocumentSave(req, res) {
+  if (req.uploadError) return res.redirect('/admin/content?status=legal-error');
+  const title = String(req.body.title || '').trim();
+  const description = String(req.body.description || '').trim();
+  if (!title || !(req.files || []).length) return res.redirect('/admin/content?status=legal-error');
+  const uploadedImages = [];
+  for (const file of req.files) {
+    const uploadResult = await uploadLegalDocument(file, req.user.accessToken);
+    if (uploadResult.error) return res.redirect('/admin/content?status=legal-error');
+    uploadedImages.push(uploadResult.url);
+  }
+  const extension = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' }[req.files[0].mimetype];
+  const { data, error } = await supabaseRequest('/rest/v1/legal_documents', { method: 'POST', token: req.user.accessToken, body: { title, description, file_url: uploadedImages[0], file_name: `${title}.${extension}` }, returning: true });
+  const legalDocumentId = Array.isArray(data) ? data[0]?.id : data?.id;
+  if (!error && legalDocumentId && uploadedImages.length > 1) await supabase(req.user.accessToken).from('legal_document_images').insert(uploadedImages.slice(1).map((image_url) => ({ legal_document_id: legalDocumentId, image_url })));
+  res.redirect(`/admin/content?status=${error ? 'legal-error' : 'legal-saved'}`);
+}
+
+async function uploadLegalDocument(file, accessToken) {
+  const extension = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' }[file.mimetype];
+  if (!extension) return { error: new Error('Only image files are allowed.') };
+  const objectPath = `legal-documents/${crypto.randomUUID()}.${extension}`;
+  try {
+    const response = await fetch(`${supabaseUrl}/storage/v1/object/bfimpc-content/${objectPath}`, {
+      method: 'POST',
+      headers: { apikey: supabaseAnonKey, Authorization: `Bearer ${accessToken}`, 'Content-Type': file.mimetype, 'x-upsert': 'false' },
+      body: file.buffer
+    });
+    if (!response.ok) return { error: new Error('Document upload failed.') };
+    return { url: `${supabaseUrl}/storage/v1/object/public/bfimpc-content/${objectPath}`, error: null };
+  } catch (error) { return { error }; }
+}
+
+async function handleLegalDocumentDelete(req, res) {
+  const { error } = await supabase(req.user.accessToken).from('legal_documents').delete().eq('id', req.params.id);
+  res.redirect(`/admin/content?status=${error ? 'legal-error' : 'legal-deleted'}`);
 }
 
 async function handleAffiliateSave(req, res) {
@@ -544,9 +664,144 @@ async function handleStaffDelete(req, res) {
   res.redirect(`/admin/accounts?status=${error ? 'staff-error' : 'staff-deleted'}`);
 }
 
+async function membershipApplicationById(id, accessToken) {
+  if (!Number.isSafeInteger(id) || id < 1) return null;
+  const result = await supabaseRequest(`/rest/v1/membership_applications?select=*&id=eq.${id}`, { token: accessToken });
+  return Array.isArray(result.data) ? result.data[0] || null : null;
+}
+
+async function downloadMembershipPhoto(application, accessToken) {
+  const response = await fetch(`${supabaseUrl}/storage/v1/object/membership-photos/${application.photo_path.split('/').map(encodeURIComponent).join('/')}`, { headers: { apikey: supabaseAnonKey, Authorization: `Bearer ${accessToken}` } });
+  if (!response.ok) return null;
+  return { buffer: Buffer.from(await response.arrayBuffer()), type: response.headers.get('content-type') || 'image/jpeg' };
+}
+
+async function handleMembershipPhoto(req, res) {
+  const application = await membershipApplicationById(Number(req.params.id), req.user.accessToken);
+  if (!application) return res.status(404).send('Membership application not found.');
+  const photo = await downloadMembershipPhoto(application, req.user.accessToken);
+  if (!photo) return res.status(404).send('Photo not found.');
+  res.type(photo.type).send(photo.buffer);
+}
+
+async function handleMembershipExport(req, res) {
+  const application = await membershipApplicationById(Number(req.params.id), req.user.accessToken);
+  if (!application) return res.status(404).send('Membership application not found.');
+  const photo = await downloadMembershipPhoto(application, req.user.accessToken);
+  if (!photo) return res.status(404).send('Photo not found.');
+  try {
+    const document = createMembershipExport(application, photo);
+    const filename = `BFIMPC-membership-${application.id}.docx`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.type('application/vnd.openxmlformats-officedocument.wordprocessingml.document').send(document);
+  } catch (error) {
+    console.error('Unable to export membership application:', error.message);
+    res.status(500).send('Unable to create the Word export.');
+  }
+}
+
+async function handleMembershipApplicationDelete(req, res) {
+  const applicationId = Number(req.params.id);
+  if (!Number.isSafeInteger(applicationId) || applicationId < 1) return res.redirect('/admin/memberships?status=membership-delete-error');
+  const { data: photoPath, error } = await supabase(req.user.accessToken).rpc('delete_membership_application', { target_application_id: applicationId });
+  if (error) {
+    console.error('Unable to delete membership application:', error.message);
+    return res.redirect('/admin/memberships?status=membership-delete-error');
+  }
+  try {
+    await fetch(`${supabaseUrl}/storage/v1/object/membership-photos/${String(photoPath || '').split('/').map(encodeURIComponent).join('/')}`, {
+      method: 'DELETE', headers: { apikey: supabaseAnonKey, Authorization: `Bearer ${req.user.accessToken}` }
+    });
+  } catch (_) {}
+  res.redirect('/admin/memberships?status=membership-deleted');
+}
+
+async function renderMembershipApplicationPreview(req, res) {
+  const application = await membershipApplicationById(Number(req.params.id), req.user.accessToken);
+  if (!application) return res.status(404).send('Membership application not found.');
+  const field = (label, value) => `<div class="membership-preview-field"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value || '—')}</strong></div>`;
+  const personal = [field('Full name', `${application.last_name}, ${application.first_name} ${application.middle_name || ''}`), field('Birthday', wordDate(application.birthdate)), field('Sex', application.sex), field('TIN / SSS no.', application.tin_sss), field('Marital status', application.marital_status), field('Spouse', application.spouse_name), field('Spouse birthday', wordDate(application.spouse_birthdate)), field('Phone no.', application.phone), field('Email address', application.email), field('Occupation and employer', application.occupation_employer), field('Address', `${application.street}, ${application.barangay}, ${application.municipality}, ${application.province}, ${application.zip_code}`)].join('');
+  const emergency = [field('Full name', `${application.emergency_last_name}, ${application.emergency_first_name} ${application.emergency_middle_name || ''}`), field('Phone no.', application.emergency_phone), field('Address', `${application.emergency_street}, ${application.emergency_barangay}, ${application.emergency_municipality}, ${application.emergency_province}, ${application.emergency_zip_code}`)].join('');
+  const beneficiaries = [field('Primary beneficiary', `${application.primary_beneficiary_name || '—'} · ${wordDate(application.primary_beneficiary_birthdate) || '—'} · ${application.primary_beneficiary_relationship || '—'}`), field('Secondary beneficiary', `${application.secondary_beneficiary_name || '—'} · ${wordDate(application.secondary_beneficiary_birthdate) || '—'} · ${application.secondary_beneficiary_relationship || '—'}`)].join('');
+  const content = `<section class="admin-heading"><p class="section-kicker">Membership application #${application.id}</p><h1>${escapeHtml(`${application.first_name} ${application.last_name}`)}</h1><p>Submitted ${wordDate(application.created_at)}.</p></section><section class="admin-section membership-preview"><div class="membership-preview-heading"><img src="/admin/memberships/${application.id}/photo" alt="2x2 photo of ${escapeHtml(`${application.first_name} ${application.last_name}`)}"><div><h2>Application details</h2><a class="auth-submit" href="/admin/memberships/${application.id}/export.docx"><i class="bi bi-file-earmark-word"></i> Export editable Word file</a></div></div><h3>Personal information</h3><div class="membership-preview-grid">${personal}</div><h3>Emergency contact</h3><div class="membership-preview-grid">${emergency}</div><h3>Beneficiaries</h3><div class="membership-preview-grid">${beneficiaries}</div><form class="membership-delete-form" action="/admin/memberships/${application.id}/delete" method="post"><button class="admin-delete" type="submit"><i class="bi bi-trash"></i> Delete application</button></form></section>`;
+  res.type('html').send(adminDocument(adminFrame(req.user, 'memberships', content)));
+}
+
+async function renderMembershipApplications(res, user, status) {
+  const result = await supabaseRequest('/rest/v1/membership_applications?select=*&order=created_at.desc', { token: user.accessToken });
+  const applications = Array.isArray(result.data) ? result.data : [];
+  const notice = status === 'membership-deleted' ? '<div class="auth-alert success">Membership application deleted.</div>' : status === 'membership-delete-error' ? '<div class="auth-alert">Unable to delete this membership application.</div>' : status === 'membership-export-error' ? '<div class="auth-alert">Unable to export this membership application.</div>' : '';
+  const rows = applications.map((item) => `<article class="membership-record"><img src="/admin/memberships/${item.id}/photo" alt="2x2 photo of ${escapeHtml(`${item.first_name} ${item.last_name}`)}"><div><h3>${escapeHtml(`${item.last_name}, ${item.first_name} ${item.middle_name || ''}`.trim())}</h3><p>${escapeHtml(item.email)} · ${escapeHtml(item.phone)}</p><small>Submitted ${wordDate(item.created_at)}</small></div><div class="membership-record-actions"><a class="admin-preview-button" href="/admin/memberships/${item.id}"><i class="bi bi-eye"></i> Preview</a><a class="auth-submit" href="/admin/memberships/${item.id}/export.docx"><i class="bi bi-file-earmark-word"></i> Export Word</a><form action="/admin/memberships/${item.id}/delete" method="post"><button class="admin-delete" type="submit"><i class="bi bi-trash"></i> Delete</button></form></div></article>`).join('') || '<p class="admin-empty">No membership applications yet.</p>';
+  const content = `<section class="admin-heading"><p class="section-kicker">Membership</p><h1>Membership applications</h1><p>Review submitted member records and export completed Word forms.</p></section>${notice}<section class="admin-section admin-page-section"><div class="admin-section-heading"><h2>Submitted applications</h2><span>${applications.length} total</span></div><div class="membership-record-list">${rows}</div></section>`;
+  res.type('html').send(adminDocument(adminFrame(user, 'memberships', content)));
+}
+
+function wordXml(value) { return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function wordDate(value) { if (!value) return ''; const date = new Date(String(value).length <= 10 ? `${value}T00:00:00` : value); return Number.isNaN(date.valueOf()) ? '' : date.toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' }); }
+function wordParagraph(value) { return `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:sz w:val="18"/><w:color w:val="111111"/></w:rPr><w:t xml:space="preserve">${wordXml(value)}</w:t></w:r></w:p>`; }
+
+function populateMembershipTemplate(xml, application) {
+  const tables = xml.match(/<w:tbl(?: [^>]*)?>[\s\S]*?<\/w:tbl>/g);
+  if (!tables?.length) throw new Error('Membership Word template has no application table.');
+  const fields = [
+    // Membership number and date are assigned by the cooperative, so preserve
+    // their empty fields from the provided Word template.
+    [1, 1, `${application.last_name}, ${application.first_name} ${application.middle_name || ''}`], [2, 1, `${application.street}, ${application.barangay}, ${application.municipality}, ${application.province}, ${application.zip_code}`], [3, 1, wordDate(application.birthdate)], [4, 1, `${application.sex}    TIN / SSS: ${application.tin_sss || '—'}`], [5, 1, `${application.marital_status || '—'}  |  ${application.spouse_name || '—'}  |  ${wordDate(application.spouse_birthdate) || '—'}`], [6, 1, application.phone], [7, 1, application.email], [8, 1, application.occupation_employer || '—'], [9, 1, `${application.emergency_last_name}, ${application.emergency_first_name} ${application.emergency_middle_name || ''}`], [10, 1, `${application.emergency_street}, ${application.emergency_barangay}, ${application.emergency_municipality}, ${application.emergency_province}, ${application.emergency_zip_code}`], [11, 1, application.emergency_phone], [12, 1, `${application.primary_beneficiary_name || '—'}  |  ${wordDate(application.primary_beneficiary_birthdate) || '—'}  |  ${application.primary_beneficiary_relationship || '—'}`], [13, 1, `${application.secondary_beneficiary_name || '—'}  |  ${wordDate(application.secondary_beneficiary_birthdate) || '—'}  |  ${application.secondary_beneficiary_relationship || '—'}`]
+  ];
+  const rows = tables[0].match(/<w:tr(?: [^>]*)?>[\s\S]*?<\/w:tr>/g) || [];
+  for (const [rowIndex, cellIndex, value] of fields) {
+    if (!rows[rowIndex]) continue;
+    const cells = rows[rowIndex].match(/<w:tc(?: [^>]*)?>[\s\S]*?<\/w:tc>/g) || [];
+    if (!cells[cellIndex]) continue;
+    cells[cellIndex] = cells[cellIndex].replace(/<\/w:tc>$/, `${wordParagraph(value)}</w:tc>`);
+    rows[rowIndex] = rows[rowIndex].replace(/<w:tc(?: [^>]*)?>[\s\S]*?<\/w:tc>/g, () => cells.shift());
+  }
+  tables[0] = tables[0].replace(/<w:tr(?: [^>]*)?>[\s\S]*?<\/w:tr>/g, () => rows.shift());
+  return xml.replace(/<w:tbl(?: [^>]*)?>[\s\S]*?<\/w:tbl>/, tables[0]);
+}
+
+function createMembershipExport(application, photo) {
+  const template = path.join(__dirname, 'templates', 'membership-form-template.docx');
+  const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'bfimpc-membership-export-'));
+  const output = path.join(os.tmpdir(), `bfimpc-membership-${crypto.randomUUID()}.docx`);
+  try {
+    execFileSync('unzip', ['-q', template, '-d', tempDirectory]);
+    const documentPath = path.join(tempDirectory, 'word', 'document.xml');
+    let documentXml = populateMembershipTemplate(fs.readFileSync(documentPath, 'utf8'), application);
+    // The template's image2 placeholder is the 2×2 photo.  Only update the
+    // individual drawing that uses its relationship: the prior expression
+    // could span from the first anchor (the logo) to this one.
+    documentXml = documentXml.replace(/<wp:anchor\b[\s\S]*?<\/wp:anchor>/g, (anchor) => (
+      anchor.includes('r:embed="rId13"')
+        ? anchor.replace(/<wp:wrapSquare\b[^>]*\/>/, '<wp:wrapNone/>')
+        : anchor
+    ));
+    fs.writeFileSync(documentPath, documentXml);
+    const extension = photo.type.includes('png') ? 'png' : 'jpg';
+    const originalPhoto = path.join(tempDirectory, 'word', 'media', 'image2.png');
+    const replacementPhoto = path.join(tempDirectory, 'word', 'media', `image2.${extension}`);
+    fs.writeFileSync(replacementPhoto, photo.buffer);
+    if (replacementPhoto !== originalPhoto) fs.rmSync(originalPhoto, { force: true });
+    const relationshipsPath = path.join(tempDirectory, 'word', '_rels', 'document.xml.rels');
+    fs.writeFileSync(relationshipsPath, fs.readFileSync(relationshipsPath, 'utf8').replace('media/image2.png', `media/image2.${extension}`));
+    if (extension === 'jpg') {
+      const contentTypesPath = path.join(tempDirectory, '[Content_Types].xml');
+      let types = fs.readFileSync(contentTypesPath, 'utf8');
+      if (!types.includes('Extension="jpg"')) types = types.replace('</Types>', '<Default Extension="jpg" ContentType="image/jpeg"/></Types>');
+      fs.writeFileSync(contentTypesPath, types);
+    }
+    execFileSync('zip', ['-q', '-r', output, '.'], { cwd: tempDirectory });
+    return fs.readFileSync(output);
+  } finally {
+    fs.rmSync(tempDirectory, { recursive: true, force: true });
+    fs.rmSync(output, { force: true });
+  }
+}
+
 async function renderAdmin(res, user, status, section = 'home', staffMode = false) {
-  const [portfolioResult, inboxResult, adminsResult, usersResult, staffResult, affiliatesResult] = await Promise.all([
+  const [portfolioResult, legalDocumentsResult, inboxResult, adminsResult, usersResult, staffResult, affiliatesResult] = await Promise.all([
     supabaseRequest('/rest/v1/portfolio_items?select=*&order=sort_order.asc,id.asc', { token: user.accessToken }),
+    supabaseRequest('/rest/v1/legal_documents?select=*&order=created_at.desc', { token: user.accessToken }),
     supabaseRequest('/rest/v1/contact_messages?select=*&order=created_at.desc', { token: user.accessToken }),
     supabaseRequest('/rest/v1/admins?select=*&order=created_at.asc', { token: user.accessToken }),
     supabase(user.accessToken).rpc('list_user_accounts', {}),
@@ -554,15 +809,17 @@ async function renderAdmin(res, user, status, section = 'home', staffMode = fals
     supabaseRequest('/rest/v1/affiliates?select=*&order=created_at.asc', { token: user.accessToken })
   ]);
   const portfolio = Array.isArray(portfolioResult.data) ? portfolioResult.data : [];
+  const legalDocuments = Array.isArray(legalDocumentsResult.data) ? legalDocumentsResult.data : [];
   const inbox = Array.isArray(inboxResult.data) ? inboxResult.data : [];
   const admins = Array.isArray(adminsResult.data) ? adminsResult.data : [];
   const users = Array.isArray(usersResult.data) ? usersResult.data : [];
   const staff = Array.isArray(staffResult.data) ? staffResult.data : [];
   const affiliates = Array.isArray(affiliatesResult.data) ? affiliatesResult.data : [];
-  const messages = { 'portfolio-saved': 'Content saved.', 'portfolio-deleted': 'Content deleted.', 'portfolio-error': 'Unable to update content.', 'affiliate-added': 'Affiliate added.', 'affiliate-deleted': 'Affiliate removed.', 'affiliate-error': 'Unable to update affiliates.', 'admin-added': 'Administrator added.', 'admin-deleted': 'Administrator removed.', 'admin-error': 'Unable to update administrators.', 'staff-added': 'Staff account added.', 'staff-deleted': 'Staff account removed.', 'staff-error': 'Unable to update staff accounts.', 'user-deleted': 'User account deleted.', 'user-error': 'Unable to delete this user account.' };
+  const messages = { 'portfolio-saved': 'Portfolio post saved.', 'portfolio-deleted': 'Portfolio post deleted.', 'portfolio-error': 'Unable to update the portfolio post.', 'legal-saved': 'Legal document uploaded.', 'legal-deleted': 'Legal document deleted.', 'legal-error': 'Unable to update legal documents.', 'affiliate-added': 'Affiliate added.', 'affiliate-deleted': 'Affiliate removed.', 'affiliate-error': 'Unable to update affiliates.', 'admin-added': 'Administrator added.', 'admin-deleted': 'Administrator removed.', 'admin-error': 'Unable to update administrators.', 'staff-added': 'Staff account added.', 'staff-deleted': 'Staff account removed.', 'staff-error': 'Unable to update staff accounts.', 'user-deleted': 'User account deleted.', 'user-error': 'Unable to delete this user account.' };
   const notice = messages[status] ? `<div class="auth-alert ${status.endsWith('saved') || status.endsWith('added') || status.endsWith('deleted') ? 'success' : ''}">${messages[status]}</div>` : '';
-  const counts = { content: portfolio.length, inbox: inbox.length, accounts: admins.length, users: users.length, staff: staff.length, affiliates: affiliates.length };
+  const counts = { content: portfolio.length, legalDocuments: legalDocuments.length, inbox: inbox.length, accounts: admins.length, users: users.length, staff: staff.length, affiliates: affiliates.length };
   const cards = portfolio.map((item) => `<article class="admin-content-card"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.alt_text)}"><div class="admin-content-card-body"><div class="admin-content-card-meta"><span><i class="bi bi-images"></i> Portfolio post</span><span class="admin-status"><i class="bi bi-check-circle-fill"></i> Published</span></div><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.caption)}</p><small>Added ${new Date(item.created_at).toLocaleDateString()}</small><details class="admin-editor"><summary><i class="bi bi-pencil"></i> Edit content</summary><form class="admin-item" action="/admin/portfolio" method="post"><input type="hidden" name="id" value="${item.id}"><label>Title<input name="title" value="${escapeHtml(item.title)}" required></label><label>Image URL<input name="image_url" value="${escapeHtml(item.image_url)}" required></label><label>Image description<input name="alt_text" value="${escapeHtml(item.alt_text)}"></label><label>Display order<input name="sort_order" type="number" value="${item.sort_order}"><small>Lower numbers appear first.</small></label><label class="admin-field-wide">Description<textarea name="caption" required>${escapeHtml(item.caption)}</textarea></label><div class="admin-edit-actions"><button class="auth-submit" type="submit">Save changes</button><button class="admin-delete" formaction="/admin/portfolio/${item.id}/delete" formmethod="post" type="submit">Delete</button></div></form></details></div></article>`).join('') || '<p class="admin-empty">No content posts found.</p>';
+  const legalRows = legalDocuments.map((document) => `<article class="admin-document-row"><img src="${escapeHtml(document.file_url)}" alt="${escapeHtml(document.title)}"><div><h3>${escapeHtml(document.title)}</h3><p>${escapeHtml(document.description || 'Legal document')}</p><small>Uploaded ${new Date(document.created_at).toLocaleDateString()}</small></div><a href="${escapeHtml(document.file_url)}" target="_blank" rel="noopener">View image</a><form action="/admin/legal-documents/${document.id}/delete" method="post"><button class="admin-delete" type="submit"><i class="bi bi-trash"></i> Delete</button></form></article>`).join('') || '<p class="admin-empty">No legal documents uploaded.</p>';
   const inboxRows = inbox.map((item) => `<article class="admin-message"><h3>${escapeHtml(item.subject)}</h3><p><strong>${escapeHtml(item.name)}</strong> · <a href="mailto:${escapeHtml(item.email)}">${escapeHtml(item.email)}</a></p><p>${escapeHtml(item.message)}</p><small>${new Date(item.created_at).toLocaleString()}</small></article>`).join('') || '<p class="admin-empty">No contact messages yet.</p>';
   const adminRows = admins.map((admin) => `<li>${escapeHtml(admin.email)}${admin.user_id === user.id ? ' <em>(you)</em>' : `<form action="/admin/admins/${admin.user_id}/delete" method="post"><button class="admin-delete" type="submit">Remove</button></form>`}</li>`).join('');
   const staffRows = staff.map((member) => `<li>${escapeHtml(member.email)}<form action="/admin/staff/${member.user_id}/delete" method="post"><button class="admin-delete" type="submit">Remove</button></form></li>`).join('') || '<li class="admin-empty">No staff accounts yet.</li>';
@@ -570,7 +827,7 @@ async function renderAdmin(res, user, status, section = 'home', staffMode = fals
   const affiliateRows = affiliates.map((affiliate) => `<article class="admin-affiliate-row" data-affiliate-id="${affiliate.id}"><img src="${escapeHtml(affiliate.logo_url)}" alt="${escapeHtml(affiliate.company_name)} logo"><strong>${escapeHtml(affiliate.company_name)}</strong><button class="admin-delete" data-affiliate-delete="${affiliate.id}" type="button"><i class="bi bi-trash"></i> Remove</button></article>`).join('') || '<p class="admin-empty" data-affiliate-empty>No affiliates yet.</p>';
   const pages = {
     home: `<section class="admin-heading"><h1>Dashboard overview</h1><p>A brief view of BFIMPC administration.</p></section><section class="admin-stats admin-summary" aria-label="Dashboard totals"><a href="/admin/content"><span class="stat-icon blue"><i class="bi bi-images"></i></span><div><strong>${counts.content}</strong><small>Total content posts</small><em>Manage content <i class="bi bi-arrow-right"></i></em></div></a><a href="/admin/inbox"><span class="stat-icon orange"><i class="bi bi-envelope"></i></span><div><strong>${counts.inbox}</strong><small>Contact messages</small><em>Open inbox <i class="bi bi-arrow-right"></i></em></div></a><a href="/admin/users"><span class="stat-icon green"><i class="bi bi-people"></i></span><div><strong>${counts.users}</strong><small>User accounts</small><em>Manage accounts <i class="bi bi-arrow-right"></i></em></div></a><a href="/admin/accounts"><span class="stat-icon blue"><i class="bi bi-shield-check"></i></span><div><strong>${counts.accounts}</strong><small>Administrator accounts</small><em>Manage access <i class="bi bi-arrow-right"></i></em></div></a></section>`,
-    content: `<section class="admin-heading"><p class="section-kicker">Website content</p><h1>Content manager</h1><p>Create and edit portfolio posts with an image and description.</p></section>${notice}<details class="admin-create"><summary><i class="bi bi-plus-lg"></i> Create content</summary><form class="admin-item admin-new" action="/admin/portfolio" method="post"><label>Title<input name="title" placeholder="e.g. Community outreach" required></label><label>Image URL<input name="image_url" placeholder="/assets/img/portfolio/image.jpg" required></label><label>Image description<input name="alt_text" placeholder="Describe the image"></label><label>Display order<input name="sort_order" type="number" value="0"><small>Lower numbers appear first.</small></label><label class="admin-field-wide">Description<textarea name="caption" placeholder="Write a short description" required></textarea></label><button class="auth-submit" type="submit"><i class="bi bi-check-lg"></i> Save content</button></form></details><div class="admin-content-grid">${cards}</div>`,
+    content: `<section class="admin-heading"><p class="section-kicker">Website content</p><h1>Content manager</h1><p>Create portfolio posts or upload legal document images for the public Portfolio page.</p></section>${notice}<section class="admin-section admin-page-section"><div class="admin-section-heading"><h2>Create content</h2></div><div class="admin-content-forms"><form class="admin-item admin-new" action="/admin/portfolio" method="post" enctype="multipart/form-data"><h3><i class="bi bi-images"></i> Portfolio post</h3><label>Title<input name="title" placeholder="e.g. Community outreach" required></label><label>Images from device<input name="image" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple required><small>You can choose more than one image.</small></label><label>Display order<input name="sort_order" type="number" value="0"><small>Lower numbers appear first.</small></label><label class="admin-field-wide">Description<textarea name="caption" placeholder="Write a short description" required></textarea></label><button class="auth-submit" type="submit"><i class="bi bi-check-lg"></i> Save portfolio post</button></form>${user.isAdmin ? `<form class="admin-item admin-new" action="/admin/legal-documents" method="post" enctype="multipart/form-data"><h3><i class="bi bi-image"></i> Legal document</h3><label>Document title<input name="title" placeholder="e.g. Certificate of Registration" required></label><label>Document images<input name="document" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple required><small>You can choose more than one image.</small></label><label class="admin-field-wide">Description <small>(optional)</small><textarea name="description" placeholder="Briefly describe this document"></textarea></label><button class="auth-submit" type="submit"><i class="bi bi-upload"></i> Upload legal document</button></form>` : ''}</div></section><section class="admin-section admin-page-section"><div class="admin-section-heading"><h2>Portfolio posts</h2><span>${counts.content} total</span></div><div class="admin-content-grid">${cards}</div></section>${user.isAdmin ? `<section class="admin-section admin-page-section"><div class="admin-section-heading"><h2>Legal Documents</h2><span>${counts.legalDocuments} total</span></div><div class="admin-document-list">${legalRows}</div></section>` : ''}`,
     affiliates: `<section class="admin-heading"><p class="section-kicker">Partner network</p><h1>Affiliate management</h1><p>Add or remove affiliates shown in the public BFI MPC partner gallery.</p></section><div class="admin-affiliate-notice" aria-live="polite"></div><section class="admin-section admin-page-section"><div class="admin-section-heading"><h2>Current affiliates</h2><span data-affiliate-count>${counts.affiliates} total</span></div><form class="admin-affiliate-form" data-affiliate-form action="/admin/affiliates" method="post" enctype="multipart/form-data"><label>Company name<input name="company_name" maxlength="160" required></label><label>Company logo or image<input name="image" type="file" accept="image/jpeg,image/png,image/webp,image/gif" required></label><button class="auth-submit" type="submit"><i class="bi bi-plus-lg"></i> Add affiliate</button></form><div class="admin-affiliate-list" data-affiliate-list>${affiliateRows}</div></section>`,
     inbox: `<section class="admin-heading"><p class="section-kicker">Messages</p><h1>Contact inbox</h1><p>Messages submitted through the BFIMPC contact form.</p></section><section class="admin-section admin-page-section"><div class="admin-section-heading"><h2>All messages</h2><span>${counts.inbox} total</span></div><div class="admin-inbox">${inboxRows}</div></section>`,
     accounts: `<section class="admin-heading"><p class="section-kicker">Access control</p><h1>Admin accounts</h1><p>Manage administrator and staff access.</p></section>${notice}<section class="admin-section admin-page-section"><div class="admin-section-heading"><h2>Administrators</h2></div><form class="admin-add" action="/admin/admins" method="post"><input name="email" type="email" placeholder="Existing user email" required><button class="auth-submit" type="submit"><i class="bi bi-person-plus"></i> Add administrator</button></form><ul class="admin-admins">${adminRows}</ul></section><section class="admin-section"><div class="admin-section-heading"><div><p class="section-kicker">Restricted access</p><h2>Staff account management</h2></div><button class="auth-submit" type="button" data-open-staff-modal><i class="bi bi-person-plus"></i> Add staff account</button></div><p class="admin-section-description">Staff can access only Content Manager and Contact Inbox.</p><ul class="admin-admins">${staffRows}</ul></section><div class="admin-modal" data-staff-modal hidden><div class="admin-modal-backdrop" data-close-staff-modal></div><section class="admin-modal-card" role="dialog" aria-modal="true"><button class="admin-modal-close" type="button" data-close-staff-modal><i class="bi bi-x-lg"></i></button><h2>Add Staff Account</h2><p>Create a BFIMPC staff login with restricted dashboard access.</p><form class="admin-modal-form" action="/admin/staff" method="post"><label>Full name<input name="full_name" placeholder="e.g. Maria Santos" required></label><label>Position<select disabled><option>Staff</option></select><small>Staff can manage content and view contact messages only.</small></label><label>Email<input name="email" type="email" placeholder="staff@bfimpc.com" required></label><div class="auth-grid"><label>Password<input name="password" type="password" minlength="8" placeholder="At least 8 characters" required></label><label>Confirm password<input name="confirm_password" type="password" minlength="8" placeholder="Repeat password" required></label></div><div class="admin-modal-actions"><button class="admin-modal-cancel" type="button" data-close-staff-modal>Cancel</button><button class="auth-submit" type="submit">Create</button></div></form></section></div>`,
@@ -586,7 +843,7 @@ async function renderAdmin(res, user, status, section = 'home', staffMode = fals
 function adminFrame(user, active, page, staffMode = false) {
   const initials = escapeHtml((user.firstName || user.email).trim().charAt(0).toUpperCase());
   const nav = (key, href, icon, label) => `<a class="${active === key ? 'active' : ''}" href="${href}"><i class="bi bi-${icon}"></i> ${label}</a>`;
-  const navigation = staffMode ? `${nav('content', '/staff/content', 'upload', 'Content manager')}${nav('inbox', '/staff/inbox', 'inbox', 'Contact inbox')}${nav('profile', '/account', 'person-circle', 'My profile')}` : `${nav('home', '/admin', 'house', 'Home')}${nav('content', '/admin/content', 'upload', 'Content manager')}${nav('affiliates', '/admin/affiliates', 'people', 'Affiliate partners')}${nav('inbox', '/admin/inbox', 'inbox', 'Contact inbox')}${nav('users', '/admin/users', 'people', 'Account manager')}${nav('accounts', '/admin/accounts', 'shield-check', 'Admin accounts')}${nav('profile', '/account', 'person-circle', 'My profile')}`;
+  const navigation = staffMode ? `${nav('content', '/staff/content', 'upload', 'Content manager')}${nav('inbox', '/staff/inbox', 'inbox', 'Contact inbox')}${nav('profile', '/account', 'person-circle', 'My profile')}` : `${nav('home', '/admin', 'house', 'Home')}${nav('content', '/admin/content', 'upload', 'Content manager')}${nav('memberships', '/admin/memberships', 'person-vcard', 'Membership records')}${nav('affiliates', '/admin/affiliates', 'people', 'Affiliate partners')}${nav('inbox', '/admin/inbox', 'inbox', 'Contact inbox')}${nav('users', '/admin/users', 'people', 'Account manager')}${nav('accounts', '/admin/accounts', 'shield-check', 'Admin accounts')}${nav('profile', '/account', 'person-circle', 'My profile')}`;
   return `<main class="admin-page"><aside class="admin-sidebar"><a class="admin-brand" href="${staffMode ? '/staff/content' : '/admin'}"><span class="admin-brand-mark"><i class="bi bi-shield-check"></i></span><span><strong>BFIMPC</strong><small>${staffMode ? 'Staff portal' : 'Administration'}</small></span></a><nav class="admin-nav" aria-label="Admin navigation">${navigation}</nav><form class="admin-logout" action="/logout" method="post"><button type="submit"><i class="bi bi-box-arrow-right"></i> Log out</button></form></aside><section class="admin-workspace"><header class="admin-topbar"><button class="admin-menu-toggle" type="button" aria-label="Open navigation"><i class="bi bi-list"></i></button><div class="admin-user"><span class="admin-avatar">${initials}</span><span><strong>${escapeHtml(user.firstName || 'Staff')}</strong><small>${staffMode ? 'Staff' : 'Administrator'}</small></span></div></header><div class="admin-content">${page}</div></section></main>`;
 }
 
@@ -614,10 +871,25 @@ function adminDocument(content) {
 }
 
 async function portfolioFragment() {
-  const { data } = await supabaseRequest('/rest/v1/portfolio_items?select=*&order=sort_order.asc,id.asc');
-  if (!Array.isArray(data) || !data.length) return fragment('portfolio');
-  const cards = data.map((item) => `<article class="col-lg-4 col-md-6 portfolio-item"><div class="portfolio-wrap"><a href="${escapeHtml(item.image_url)}" data-gallery="portfolioGallery" class="portfolio-image portfolio-lightbox" title="${escapeHtml(item.caption)}"><img src="${escapeHtml(item.image_url)}" class="img-fluid" alt="${escapeHtml(item.alt_text)}"><span class="portfolio-zoom"><i class="bi bi-arrows-angle-expand"></i></span></a><div class="portfolio-info"><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.caption)}</p></div></div></article>`).join('');
-  return `<section id="portfolio" class="portfolio"><div class="navigation-background"></div><div class="container" data-aos="fade-up"><div class="section-title portfolio-heading"><h2>Our story</h2><p>Moments that bring BFIMPC together</p><span>Celebrating the people, milestones, and shared purpose behind our cooperative.</span></div><div class="row g-4 portfolio-container" data-aos="fade-up" data-aos-delay="150">${cards}</div></div></section>`;
+  const [portfolioResult, legalDocumentsResult, portfolioImagesResult, legalImagesResult] = await Promise.all([
+    supabaseRequest('/rest/v1/portfolio_items?select=*&order=sort_order.asc,id.asc'),
+    supabaseRequest('/rest/v1/legal_documents?select=*&order=created_at.desc'),
+    supabaseRequest('/rest/v1/portfolio_item_images?select=*&order=created_at.asc,id.asc'),
+    supabaseRequest('/rest/v1/legal_document_images?select=*&order=created_at.asc,id.asc')
+  ]);
+  const portfolio = Array.isArray(portfolioResult.data) ? portfolioResult.data : [];
+  const legalDocuments = Array.isArray(legalDocumentsResult.data) ? legalDocumentsResult.data : [];
+  const portfolioImages = Array.isArray(portfolioImagesResult.data) ? portfolioImagesResult.data : [];
+  const legalImages = Array.isArray(legalImagesResult.data) ? legalImagesResult.data : [];
+  const imageUrls = (images, fallback) => [fallback, ...images].filter((url, index, values) => url && values.indexOf(url) === index);
+  const gallery = (urls, alt) => `<div class="hover-gallery">${urls.map((url, index) => `<img class="${index === 0 ? 'is-active' : ''}" src="${escapeHtml(url)}" alt="${escapeHtml(alt)}">`).join('')}</div>`;
+  const galleryLinks = (urls, galleryName, title) => urls.slice(1).map((url) => `<a class="gallery-hidden portfolio-lightbox" href="${escapeHtml(url)}" data-gallery="${galleryName}" title="${escapeHtml(title)}"></a>`).join('');
+  const cards = portfolio.map((item) => { const urls = imageUrls(portfolioImages.filter((image) => image.portfolio_item_id === item.id).map((image) => image.image_url), item.image_url); const galleryName = `portfolio-${item.id}`; return `<article class="col-lg-4 col-md-6 portfolio-item"><div class="portfolio-wrap"><a href="${escapeHtml(urls[0])}" data-gallery="${galleryName}" class="portfolio-image portfolio-lightbox" title="${escapeHtml(item.caption)}">${gallery(urls, item.alt_text)}<span class="portfolio-zoom"><i class="bi bi-arrows-angle-expand"></i></span></a>${galleryLinks(urls, galleryName, item.caption)}<div class="portfolio-info"><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.caption)}</p></div></div></article>`; }).join('');
+  const documents = legalDocuments.map((document) => { const urls = imageUrls(legalImages.filter((image) => image.legal_document_id === document.id).map((image) => image.image_url), document.file_url); const galleryName = `legal-document-${document.id}`; return `<article class="legal-document"><h3>${escapeHtml(document.title)}</h3><a href="${escapeHtml(urls[0])}" data-gallery="${galleryName}" class="portfolio-lightbox" title="${escapeHtml(document.title)}">${gallery(urls, document.title)}</a>${galleryLinks(urls, galleryName, document.title)}${document.description ? `<p>${escapeHtml(document.description)}</p>` : ''}</article>`; }).join('');
+  const portfolioSection = cards ? `<div class="section-title portfolio-heading"><h2>Our story</h2><p>Moments that bring BFIMPC together</p><span>Celebrating the people, milestones, and shared purpose behind our cooperative.</span></div><div class="row g-4 portfolio-container" data-aos="fade-up" data-aos-delay="150">${cards}</div>` : '';
+  const legalSection = documents ? `<section class="legal-documents-section"><div class="section-title portfolio-heading"><h2>Legal Documents</h2><p>Official BFIMPC documents</p><span>Access the cooperative's published legal records and supporting documents.</span></div><div class="legal-document-list">${documents}</div></section>` : '';
+  if (!portfolioSection && !legalSection) return fragment('portfolio');
+  return `<section id="portfolio" class="portfolio"><div class="navigation-background"></div><div class="container" data-aos="fade-up">${legalSection}${portfolioSection}</div></section>`;
 }
 
 async function requireUser(req, res, next) {
@@ -685,12 +957,12 @@ function supabase(accessToken) {
     rpc: (name, args) => supabaseRequest(`/rest/v1/rpc/${name}`, { method: 'POST', token: accessToken, body: args })
   };
 }
-async function supabaseRequest(endpoint, { method = 'GET', token, body } = {}) {
+async function supabaseRequest(endpoint, { method = 'GET', token, body, returning = false } = {}) {
   if (!supabaseConfigured()) return { data: null, error: new Error('Supabase is not configured.') };
   try {
     const response = await fetch(`${supabaseUrl}${endpoint}`, {
       method,
-      headers: { apikey: supabaseAnonKey, ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      headers: { apikey: supabaseAnonKey, ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}), ...(returning ? { Prefer: 'return=representation' } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {})
     });
     const content = await response.text();

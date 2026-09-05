@@ -518,6 +518,39 @@ section {
   box-shadow: rgba(0, 0, 0, 0.09) 0 2px 1px, rgba(0, 0, 0, 0.09) 0 4px 2px, rgba(0, 0, 0, 0.09) 0 8px 4px, rgba(0, 0, 0, 0.09) 0 16px 8px, rgba(0, 0, 0, 0.09) 0 32px 16px;
 }
 
+.about-cooperative-graphic { position: relative; display: grid; min-height: 390px; place-content: center; overflow: hidden; border-radius: 18px; background: linear-gradient(145deg, #075b39, #0b8b59); box-shadow: 0 20px 34px rgba(8, 74, 48, .25); color: #fff; text-align: center; isolation: isolate; }
+.about-cooperative-graphic::before { content: ''; position: absolute; width: 310px; height: 310px; border: 1px solid rgba(255,255,255,.22); border-radius: 50%; }
+.graphic-orbit { position: absolute; z-index: -1; border: 30px solid rgba(255,255,255,.09); border-radius: 50%; }.orbit-one { width: 190px; height: 190px; top: -55px; left: -55px; }.orbit-two { width: 230px; height: 230px; right: -90px; bottom: -75px; }
+.graphic-emblem { display: grid; width: 82px; height: 82px; place-items: center; margin: 0 auto 16px; border: 7px solid rgba(255,255,255,.24); border-radius: 50%; background: #f4bc51; color: #075b39; font-size: 37px; box-shadow: 0 8px 22px rgba(0,0,0,.16); }.about-cooperative-graphic > strong { font: 800 29px "Poppins", sans-serif; letter-spacing: .06em; }.about-cooperative-graphic > small { margin-top: 3px; color: #d7f2e2; font: 600 12px "Poppins", sans-serif; letter-spacing: .08em; text-transform: uppercase; }.graphic-values { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin: 29px 24px 0; }.graphic-values span { display: grid; gap: 4px; padding: 9px 5px; border: 1px solid rgba(255,255,255,.19); border-radius: 9px; background: rgba(0,0,0,.12); color: #edfff4; font: 600 10px "Poppins", sans-serif; }.graphic-values i { color: #f8cc72; font-size: 16px; }
+
+/* Legal documents */
+.legal-documents-section { margin: 0 0 88px; }
+.legal-document-list { display: grid; gap: 14px; max-width: 900px; margin: 0 auto; }
+.legal-document { display: flex; align-items: center; gap: 18px; padding: 22px 24px; background: #fff; border: 1px solid #e6e0d8; border-radius: 14px; box-shadow: 0 8px 22px rgba(33, 24, 17, .08); }
+.legal-document > i { font-size: 2rem; color: #a41919; }
+.legal-document div { flex: 1; }
+.legal-document h3 { margin: 0 0 4px; font-size: 1.05rem; }
+.legal-document p { margin: 0; color: #6c6863; }
+.legal-document a { white-space: nowrap; font-weight: 700; color: #8a681d; }
+
+.admin-content-forms { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 22px; }
+.admin-content-forms .admin-item { height: 100%; }
+.admin-content-forms h3 { font-size: 1.05rem; margin-bottom: 18px; }
+.admin-content-forms h3 i, .admin-document-icon { color: #a41919; }
+.admin-document-list { display: grid; gap: 12px; }
+.admin-document-row { display: flex; align-items: center; gap: 14px; padding: 16px; border: 1px solid #e5e7eb; border-radius: 10px; background: #fff; }
+.admin-document-icon { font-size: 1.75rem; }
+.admin-document-row div { flex: 1; }
+.admin-document-row h3, .admin-document-row p { margin: 0; }
+.admin-document-row p, .admin-document-row small { color: #6b7280; }
+.admin-document-row a { font-weight: 700; color: #87681f; }
+
+@media (max-width: 575px) {
+  .legal-document, .admin-document-row { align-items: flex-start; flex-wrap: wrap; }
+  .legal-document a { width: 100%; }
+  .admin-document-row div { min-width: calc(100% - 52px); }
+}
+
 .about .container {
   margin-top: 90px;
 }
@@ -624,6 +657,57 @@ section {
   font-size: 70px;
   font-weight: 300;
 }
+
+.membership-join-banner {
+  position: relative;
+  display: grid;
+  min-height: 300px;
+  place-items: center;
+  overflow: hidden;
+  margin: 0 0 84px;
+  border-radius: 4px;
+  background: linear-gradient(105deg, #06080a 0%, #0d171c 49%, #071116 100%);
+  isolation: isolate;
+}
+
+.membership-join-banner::before {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  content: "";
+  background: linear-gradient(90deg, rgba(0, 0, 0, .5), transparent 45%, rgba(0, 0, 0, .28));
+}
+
+.membership-join-building {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  display: flex;
+  justify-content: space-between;
+  align-items: stretch;
+  padding: 0 6%;
+  opacity: .82;
+  transform: skewX(-8deg) scale(1.08);
+}
+
+.membership-join-building span {
+  display: block;
+  width: 9%;
+  border-right: 2px solid rgba(138, 199, 207, .23);
+  border-left: 1px solid rgba(0, 212, 227, .18);
+  background: repeating-linear-gradient(180deg, rgba(13, 175, 185, .22) 0 4px, transparent 4px 17px);
+  box-shadow: inset 18px 0 24px rgba(0, 0, 0, .36), inset -10px 0 20px rgba(0, 201, 216, .08);
+}
+
+.membership-join-building span:nth-child(2),
+.membership-join-building span:nth-child(5) { height: 118%; margin-top: -6%; }
+.membership-join-building span:nth-child(3) { height: 86%; align-self: flex-end; }
+.membership-join-building span:nth-child(4) { height: 108%; margin-top: -4%; }
+
+.membership-join-content { position: relative; z-index: 1; text-align: center; }
+.membership-join-content h2 { margin: 0 0 22px; color: #fff; font: 700 clamp(29px, 3vw, 43px)/1.12 "Raleway", sans-serif; }
+.membership-join-button { display: inline-block; min-width: 290px; padding: 14px 34px; border-radius: 999px; background: #e9792f; color: #fff; font: 500 20px/1.2 "Montserrat", sans-serif; transition: transform .2s ease, background .2s ease, box-shadow .2s ease; }
+.membership-join-button:hover { color: #fff; background: #cf601c; box-shadow: 0 10px 24px rgba(0, 0, 0, .35); transform: translateY(-2px); }
 
 .membership .swiper-slide img {
   opacity: 0.5;
@@ -758,6 +842,7 @@ section {
 @media (max-width: 991px) { .joining-steps { grid-template-columns: repeat(3,1fr); }.membership-value .container { grid-template-columns: 1fr; }.membership-rights { max-width: 700px; } }
 @media (max-width: 768px) { .membership-guide, .membership-process, .membership-value { padding: 65px 0; }.membership-entry-grid { grid-template-columns: 1fr; }.joining-steps { grid-template-columns: repeat(2,1fr); }.membership-eligibility, .membership-contribution, .member-benefits { padding: 26px 22px; } }
 @media (max-width: 480px) { .joining-steps { grid-template-columns: 1fr; }.joining-steps li { min-height: 0; }.membership-contribution h3 { font-size: 40px; } }
+@media (max-width: 768px) { .membership .membership-title h1 { font-size: 45px; }.membership-join-banner { min-height: 255px; margin-bottom: 60px; }.membership-join-button { min-width: min(270px, 78vw); font-size: 18px; } }
 
 /*--------------------------------------------------------------
 # Services
@@ -1483,6 +1568,22 @@ section {
   font-size: 40px;
   font-weight: 300;
 }
+
+/* Membership ID application */
+.membership-application-shell { max-width: 1120px; padding: 0 12px 90px; }
+.membership-application-form { display: grid; gap: 22px; padding: clamp(22px, 4vw, 46px); border: 1px solid #e6ded7; border-radius: 20px; background: #fff; box-shadow: 0 16px 40px rgba(40, 27, 17, .09); }
+.membership-form-intro h1 { margin: 0 0 10px; color: #29231e; font: 600 clamp(32px, 4vw, 47px)/1.1 "Raleway", sans-serif; }.membership-form-intro p:last-child { margin: 0; color: #6e645c; line-height: 1.6; }.membership-form-intro b { color: #b6531d; }
+.membership-form-section { padding: 24px; border: 1px solid #eadfd7; border-radius: 14px; background: #fffcfa; }.membership-form-section h2 { margin: 0 0 18px; color: #2d2823; font: 700 23px/1.2 "Raleway", sans-serif; }
+.membership-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 15px; }.membership-fields + .membership-fields { margin-top: 15px; }.membership-fields.three-columns { grid-template-columns: repeat(3, minmax(0, 1fr)); }.membership-fields.address-fields { grid-template-columns: 1.25fr repeat(4, minmax(0, 1fr)); }
+.membership-application-form label { display: grid; gap: 7px; color: #514940; font: 700 12px "Poppins", sans-serif; }.membership-application-form input, .membership-application-form select { width: 100%; min-height: 44px; padding: 10px 11px; border: 1px solid #dcd2ca; border-radius: 8px; outline: 0; background: #fff; color: #29231e; font: 14px "Montserrat", sans-serif; }.membership-application-form input:focus, .membership-application-form select:focus { border-color: #e9792f; box-shadow: 0 0 0 3px rgba(233,121,47,.12); }
+.membership-beneficiary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }.membership-beneficiary-grid fieldset { min-width: 0; padding: 18px; border: 1px solid #eadfd7; border-radius: 10px; }.membership-beneficiary-grid legend { float: none; width: auto; padding: 0 6px; margin: 0; color: #a64f1d; font: 700 12px "Poppins", sans-serif; text-transform: uppercase; }
+.membership-photo-section { display: flex; align-items: center; justify-content: space-between; gap: 22px; }.membership-photo-section h2 { margin-bottom: 7px; }.membership-photo-section p { margin: 0; color: #6e645c; font-size: 13px; }.membership-photo-upload { display: grid; min-width: 240px; min-height: 126px; place-content: center; justify-items: center; overflow: hidden; border: 2px dashed #dfb9a1; border-radius: 12px; background: #fff; color: #a64f1d !important; cursor: pointer; text-align: center; }.membership-photo-placeholder { display: grid; gap: 10px; justify-items: center; }.membership-photo-upload i { font-size: 28px; }.membership-photo-preview { display: block; width: 104px; height: 104px; border-radius: 7px; object-fit: cover; box-shadow: 0 4px 12px rgba(55, 32, 18, .18); }.membership-photo-upload.has-preview { padding: 10px; border-style: solid; }.membership-photo-upload input { width: 1px; min-height: 1px; padding: 0; border: 0; opacity: 0; }.membership-submit { justify-self: start; margin: 0; }
+.membership-record-list { display: grid; gap: 12px; }.membership-record { display: grid; grid-template-columns: 65px 1fr auto; gap: 15px; align-items: center; padding: 14px; border: 1px solid #e3e9ee; border-radius: 11px; background: #fbfcfe; }.membership-record > img { width: 65px; height: 65px; border-radius: 7px; object-fit: cover; background: #e9eef3; }.membership-record h3, .membership-record p { margin: 0; }.membership-record h3 { color: #253044; font-size: 15px; }.membership-record p { margin-top: 4px; color: #69758a; font-size: 12px; }.membership-record small { color: #94a0b2; font-size: 11px; }.membership-record-actions { display: flex; flex-wrap: wrap; gap: 8px; }.membership-record-actions .auth-submit, .admin-preview-button { margin: 0; padding: 10px 13px; border-radius: 8px; font: 700 12px "Inter", sans-serif; }.admin-preview-button { border: 1px solid #bfd0dc; background: #fff; color: #24516b; }.admin-preview-button:hover { color: #173d52; background: #edf7fb; }
+.membership-preview { max-width: 1050px; }.membership-preview-heading { display: flex; align-items: center; gap: 20px; padding-bottom: 22px; margin-bottom: 24px; border-bottom: 1px solid #e4e9ee; }.membership-preview-heading img { width: 106px; height: 106px; border-radius: 10px; object-fit: cover; background: #edf2f6; }.membership-preview-heading h2 { margin: 0 0 13px; color: #253044; font-size: 24px; }.membership-preview h3 { margin: 28px 0 13px; color: #24516b; font: 800 14px "Inter", sans-serif; letter-spacing: .04em; text-transform: uppercase; }.membership-preview-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; }.membership-preview-field { min-width: 0; padding: 13px; border: 1px solid #e3e9ee; border-radius: 9px; background: #fbfcfe; }.membership-preview-field small, .membership-preview-field strong { display: block; }.membership-preview-field small { margin-bottom: 5px; color: #758196; font-size: 11px; }.membership-preview-field strong { overflow-wrap: anywhere; color: #253044; font-size: 13px; line-height: 1.45; }
+.membership-delete-form { margin: 28px 0 0; }
+@media (max-width: 850px) { .membership-fields, .membership-fields.three-columns, .membership-fields.address-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }.membership-beneficiary-grid { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .membership-preview-grid { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { .membership-application-shell { padding-bottom: 55px; }.membership-application-form { padding: 18px; }.membership-form-section { padding: 19px 16px; }.membership-fields, .membership-fields.three-columns, .membership-fields.address-fields { grid-template-columns: 1fr; }.membership-photo-section { display: grid; }.membership-photo-upload { width: 100%; }.membership-submit { width: 100%; }.membership-record { grid-template-columns: 54px 1fr; }.membership-record > img { width: 54px; height: 54px; }.membership-record-actions { grid-column: 1 / -1; }.membership-record-actions .auth-submit, .membership-record-actions .admin-preview-button { display: block; flex: 1; text-align: center; }.membership-preview-heading { align-items: flex-start; }.membership-preview-heading img { width: 76px; height: 76px; } }
 /*--------------------------------------------------------------
 # Footer
 --------------------------------------------------------------*/
@@ -1998,6 +2099,36 @@ body { background: var(--bfimpc-paper); }
 .admin-topbar { min-height: 56px; position: sticky; top: 0; z-index: 30; margin-top: 0 !important; }.admin-sidebar { top: 0; z-index: 40; }.admin-workspace { position: relative; top: -60px; margin-top: 0 !important; margin-bottom: -45px; }.admin-content, .admin-heading { margin-top: 0 !important; padding-top: 0 !important; }
 @media (max-width: 900px) { .admin-sidebar { top: 0; }.admin-workspace { margin-top: 0 !important; }.admin-content { padding-top: 0 !important; } }
 @media (max-width: 600px) { .account-page, .profile-page { padding: 110px 14px 55px; }.account-card, .single-account .account-card { padding: 30px 22px; }.account-intro { padding: 34px 25px; }.auth-grid { grid-template-columns: 1fr; }.profile-summary, .settings-card { padding: 24px 20px; } }
+
+/* Keep Content Manager upload types in their own full-width rows. */
+.admin-content-forms { grid-template-columns: minmax(0, 1fr); }
+.admin-content-forms .admin-item { grid-template-columns: minmax(0, 1fr); margin-bottom: 0; }
+.admin-content-forms .admin-item h3,
+.admin-content-forms .admin-item .auth-submit { grid-column: 1; }
+
+/* Legal document images on the public Portfolio page. */
+.legal-document-list { grid-template-columns: repeat(3, minmax(0, 1fr)); max-width: 1100px; align-items: start; }
+.legal-document { display: block; overflow: hidden; padding: 0; }
+.legal-document h3 { margin: 0; padding: 18px 20px 12px; color: #2c2925; font-size: 1.1rem; }
+.legal-document a { display: block; color: inherit; }
+.legal-document img { display: block; width: 100%; height: 280px; object-fit: cover; }
+.legal-document p { padding: 12px 20px 18px; }
+.admin-document-row > img { width: 62px; height: 62px; border-radius: 8px; object-fit: cover; background: #edf1f5; }
+
+/* Hover galleries fade between additional uploaded images. */
+.hover-gallery { position: relative; height: 100%; overflow: hidden; background: #edf1f5; }
+.hover-gallery img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .45s ease; }
+.hover-gallery img.is-active { opacity: 1; }
+.portfolio-image .hover-gallery { height: 220px; }
+.legal-document .hover-gallery { height: auto; aspect-ratio: 3 / 4; background: #fff; }
+.legal-document .hover-gallery img { object-fit: contain; }
+@media (max-width: 850px) { .legal-document-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 575px) { .legal-document-list { grid-template-columns: 1fr; }.legal-document .hover-gallery { max-height: 440px; } }
+.gallery-hidden { display: none; }
+
+/* Keep lightbox navigation obvious for multi-image galleries. */
+.glightbox-container .gprev,
+.glightbox-container .gnext { display: grid !important; width: 52px; height: 52px; place-items: center; border: 2px solid rgba(255,255,255,.85); border-radius: 50%; background: rgba(0,0,0,.72) !important; opacity: 1 !important; }
 
 /* Administrator and staff profile */
 .role-profile-page { min-height: 100vh; padding: 145px 24px 90px; background: linear-gradient(135deg, #f6f8fc 0%, #fff 52%, #fff5ed 100%); }.role-profile-shell { width: min(100%, 1000px); margin: 0 auto; }.role-profile-heading { margin-bottom: 28px; }.role-profile-heading h1 { margin: 0 0 9px; color: #1f2937; font: 700 clamp(36px,4vw,52px)/1.1 "Raleway",sans-serif; }.role-profile-heading > p:last-child { margin: 0; color: #687385; font-size: 16px; }.role-profile-card { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; padding: 28px; border: 1px solid #e2e8f0; border-radius: 20px; background: rgba(255,255,255,.94); box-shadow: 0 20px 48px rgba(31,41,55,.09); }.role-profile-email { display: flex; grid-column: 1 / -1; align-items: center; gap: 14px; padding: 18px 20px; border: 1px solid #e7edf3; border-radius: 14px; background: linear-gradient(90deg, #f8fbff, #fff8f2); }.role-profile-email .admin-avatar { flex: 0 0 48px; width: 48px; height: 48px; background: #dff5e8; color: #087045; font-size: 18px; }.role-profile-email strong, .role-profile-email small { display: block; }.role-profile-email strong { color: #253044; font-size: 15px; overflow-wrap: anywhere; }.role-profile-email small { margin-top: 4px; color: #b6531d; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }.role-profile-card .profile-form { align-content: start; gap: 15px; padding: 25px; border: 1px solid #e7edf3; border-radius: 14px; background: #fff; }.role-profile-card .profile-form h2 { margin: 0 0 5px; color: #253044; font: 700 24px/1.2 "Raleway",sans-serif; }.role-profile-card .profile-form label { color: #4d5868; }.role-profile-card .profile-form input { min-height: 45px; }.role-profile-card .profile-form .auth-submit { width: max-content; margin-top: 5px; padding: 12px 18px; }.role-profile-card .forgot-link { margin-top: 2px; }.role-profile-card .role-password-form { border-top: 3px solid #e9792f; }.role-profile-page .auth-alert { margin-bottom: 20px; }

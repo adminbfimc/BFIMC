@@ -86,6 +86,44 @@ create table if not exists public.portfolio_items (
   created_at timestamptz not null default now()
 );
 
+-- Public legal document images, uploaded through the admin content manager.
+create table if not exists public.legal_documents (
+  id bigint generated always as identity primary key,
+  title text not null check (char_length(btrim(title)) between 1 and 160),
+  description text not null default '',
+  file_url text not null,
+  file_name text not null,
+  created_at timestamptz not null default now()
+);
+
+-- Additional images for portfolio posts and legal documents.
+create table if not exists public.portfolio_item_images (
+  id bigint generated always as identity primary key,
+  portfolio_item_id bigint not null references public.portfolio_items(id) on delete cascade,
+  image_url text not null,
+  alt_text text not null default 'BFIMPC portfolio image',
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.legal_document_images (
+  id bigint generated always as identity primary key,
+  legal_document_id bigint not null references public.legal_documents(id) on delete cascade,
+  image_url text not null,
+  created_at timestamptz not null default now()
+);
+
+-- The main record already stores the first image. Remove matching legacy copies
+-- from the additional-image tables so galleries do not repeat that first image.
+delete from public.portfolio_item_images additional
+using public.portfolio_items item
+where additional.portfolio_item_id = item.id
+  and additional.image_url = item.image_url;
+
+delete from public.legal_document_images additional
+using public.legal_documents document
+where additional.legal_document_id = document.id
+  and additional.image_url = document.file_url;
+
 -- Affiliate/partner directory. Logos are public URLs from the existing
 -- bfimpc-content storage bucket and are managed by administrators only.
 create table if not exists public.affiliates (
@@ -107,11 +145,32 @@ create table if not exists public.contact_messages (
   created_at timestamptz not null default now()
 );
 
+-- Membership ID applications are private to the applicant and administrators.
+create table if not exists public.membership_applications (
+  id bigint generated always as identity primary key,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  last_name text not null, first_name text not null, middle_name text not null default '',
+  street text not null, barangay text not null, municipality text not null, province text not null, zip_code text not null,
+  birthdate date not null, sex text not null check (sex in ('Male', 'Female')), tin_sss text not null default '',
+  marital_status text not null default '', spouse_name text not null default '', spouse_birthdate date,
+  phone text not null, email text not null, occupation_employer text not null default '',
+  emergency_last_name text not null, emergency_first_name text not null, emergency_middle_name text not null default '',
+  emergency_street text not null, emergency_barangay text not null, emergency_municipality text not null, emergency_province text not null, emergency_zip_code text not null, emergency_phone text not null,
+  primary_beneficiary_name text not null default '', primary_beneficiary_birthdate date, primary_beneficiary_relationship text not null default '',
+  secondary_beneficiary_name text not null default '', secondary_beneficiary_birthdate date, secondary_beneficiary_relationship text not null default '',
+  photo_path text not null,
+  created_at timestamptz not null default now()
+);
+
 alter table public.admins enable row level security;
 alter table public.staff enable row level security;
 alter table public.portfolio_items enable row level security;
+alter table public.legal_documents enable row level security;
+alter table public.portfolio_item_images enable row level security;
+alter table public.legal_document_images enable row level security;
 alter table public.affiliates enable row level security;
 alter table public.contact_messages enable row level security;
+alter table public.membership_applications enable row level security;
 
 drop trigger if exists set_affiliates_updated_at on public.affiliates;
 create trigger set_affiliates_updated_at
@@ -131,10 +190,20 @@ insert into storage.buckets (id, name, public)
 values ('bfimpc-content', 'bfimpc-content', true)
 on conflict (id) do update set public = true;
 
+insert into storage.buckets (id, name, public)
+values ('membership-photos', 'membership-photos', false)
+on conflict (id) do update set public = false;
+
 drop policy if exists "Anyone can view BFIMPC content images" on storage.objects;
 create policy "Anyone can view BFIMPC content images" on storage.objects for select using (bucket_id = 'bfimpc-content');
 drop policy if exists "Admins upload BFIMPC content images" on storage.objects;
 create policy "Admins upload BFIMPC content images" on storage.objects for insert to authenticated with check (bucket_id = 'bfimpc-content' and public.is_admin());
+drop policy if exists "Members upload their membership photo" on storage.objects;
+create policy "Members upload their membership photo" on storage.objects for insert to authenticated with check (bucket_id = 'membership-photos' and owner_id = (select auth.uid()::text));
+drop policy if exists "Members and admins can view membership photos" on storage.objects;
+create policy "Members and admins can view membership photos" on storage.objects for select to authenticated using (bucket_id = 'membership-photos' and (owner_id = (select auth.uid()::text) or public.is_admin()));
+drop policy if exists "Admins delete membership photos" on storage.objects;
+create policy "Admins delete membership photos" on storage.objects for delete to authenticated using (bucket_id = 'membership-photos' and public.is_admin());
 
 drop policy if exists "Admins can view their own role" on public.admins;
 drop policy if exists "Admins can view administrators" on public.admins;
@@ -147,18 +216,40 @@ drop policy if exists "Anyone can view portfolio items" on public.portfolio_item
 create policy "Anyone can view portfolio items" on public.portfolio_items for select using (true);
 drop policy if exists "Admins manage portfolio items" on public.portfolio_items;
 create policy "Admins manage portfolio items" on public.portfolio_items for all to authenticated using (public.is_admin()) with check (public.is_admin());
+drop policy if exists "Anyone can view portfolio images" on public.portfolio_item_images;
+create policy "Anyone can view portfolio images" on public.portfolio_item_images for select using (true);
+drop policy if exists "Admins manage portfolio images" on public.portfolio_item_images;
+create policy "Admins manage portfolio images" on public.portfolio_item_images for all to authenticated using (public.is_admin()) with check (public.is_admin());
+drop policy if exists "Anyone can view legal documents" on public.legal_documents;
+create policy "Anyone can view legal documents" on public.legal_documents for select using (true);
+drop policy if exists "Admins manage legal documents" on public.legal_documents;
+create policy "Admins manage legal documents" on public.legal_documents for all to authenticated using (public.is_admin()) with check (public.is_admin());
+drop policy if exists "Anyone can view legal document images" on public.legal_document_images;
+create policy "Anyone can view legal document images" on public.legal_document_images for select using (true);
+drop policy if exists "Admins manage legal document images" on public.legal_document_images;
+create policy "Admins manage legal document images" on public.legal_document_images for all to authenticated using (public.is_admin()) with check (public.is_admin());
 drop policy if exists "Anyone can view affiliates" on public.affiliates;
 create policy "Anyone can view affiliates" on public.affiliates for select using (true);
 drop policy if exists "Admins manage affiliates" on public.affiliates;
 create policy "Admins manage affiliates" on public.affiliates for all to authenticated using (public.is_admin()) with check (public.is_admin());
 drop policy if exists "Staff manage portfolio items" on public.portfolio_items;
 create policy "Staff manage portfolio items" on public.portfolio_items for all to authenticated using (public.is_staff()) with check (public.is_staff());
+drop policy if exists "Staff manage portfolio images" on public.portfolio_item_images;
+create policy "Staff manage portfolio images" on public.portfolio_item_images for all to authenticated using (public.is_staff()) with check (public.is_staff());
 drop policy if exists "Anyone can submit contact messages" on public.contact_messages;
 create policy "Anyone can submit contact messages" on public.contact_messages for insert to anon, authenticated with check (true);
 drop policy if exists "Admins view contact messages" on public.contact_messages;
 create policy "Admins view contact messages" on public.contact_messages for select to authenticated using (public.is_admin());
 drop policy if exists "Staff view contact messages" on public.contact_messages;
 create policy "Staff view contact messages" on public.contact_messages for select to authenticated using (public.is_staff());
+drop policy if exists "Users submit their membership application" on public.membership_applications;
+create policy "Users submit their membership application" on public.membership_applications for insert to authenticated with check (user_id = auth.uid());
+drop policy if exists "Users view their membership applications" on public.membership_applications;
+create policy "Users view their membership applications" on public.membership_applications for select to authenticated using (user_id = auth.uid());
+drop policy if exists "Admins view membership applications" on public.membership_applications;
+create policy "Admins view membership applications" on public.membership_applications for select to authenticated using (public.is_admin());
+drop policy if exists "Admins delete membership applications" on public.membership_applications;
+create policy "Admins delete membership applications" on public.membership_applications for delete to authenticated using (public.is_admin());
 
 create or replace function public.add_admin_by_email(target_email text)
 returns void language plpgsql security definer set search_path = public, auth
@@ -227,12 +318,32 @@ begin
 end;
 $$;
 
+-- Deletes a membership record only when performed by an administrator. Returning
+-- the private photo path lets the application remove the associated upload too.
+create or replace function public.delete_membership_application(target_application_id bigint)
+returns text language plpgsql security definer set search_path = public
+as $$
+declare deleted_photo_path text;
+begin
+  if not public.is_admin() then raise exception 'Admin access is required'; end if;
+  delete from public.membership_applications
+  where id = target_application_id
+  returning photo_path into deleted_photo_path;
+  if deleted_photo_path is null then raise exception 'Membership application was not found'; end if;
+  return deleted_photo_path;
+end;
+$$;
+
 grant execute on function public.add_admin_by_email(text) to authenticated;
 grant execute on function public.remove_admin(uuid) to authenticated;
 grant execute on function public.add_staff_by_email(text) to authenticated;
 grant execute on function public.remove_staff(uuid) to authenticated;
 grant execute on function public.list_user_accounts() to authenticated;
 grant execute on function public.delete_user_account(uuid) to authenticated;
+grant execute on function public.delete_membership_application(bigint) to authenticated;
+
+-- Make the new membership deletion RPC immediately visible to Supabase's REST API.
+notify pgrst, 'reload schema';
 
 do $seed$
 begin

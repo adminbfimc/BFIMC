@@ -336,6 +336,53 @@
   /* Initiate Pure Counter */
   new PureCounter();
 
+  /* Cycle uploaded gallery images while a visitor hovers over them. */
+  const initializeHoverGalleries = () => select('.hover-gallery', true).forEach((gallery) => {
+    if (gallery.dataset.hoverGalleryReady) return;
+    gallery.dataset.hoverGalleryReady = 'true';
+    const images = Array.from(gallery.querySelectorAll('img'));
+    if (images.length < 2) return;
+    let current = 0;
+    let timer;
+    const show = (index) => images.forEach((image, imageIndex) => image.classList.toggle('is-active', imageIndex === index));
+    show(0);
+    gallery.addEventListener('mouseenter', () => {
+      timer = window.setInterval(() => { current = (current + 1) % images.length; show(current); }, 1400);
+    });
+    gallery.addEventListener('mouseleave', () => { window.clearInterval(timer); current = 0; show(0); });
+  });
+  initializeHoverGalleries();
+  window.bfimpcRefreshPortfolioUi = () => {
+    portfolioLightbox.reload();
+    initializeHoverGalleries();
+    window.AOS?.refresh();
+  };
+
+  /* Preview the selected 2×2 Membership photo before the application is sent. */
+  const membershipPhotoInput = document.querySelector('input[name="photo"]');
+  membershipPhotoInput?.addEventListener('change', () => {
+    const photo = membershipPhotoInput.files?.[0];
+    const upload = membershipPhotoInput.closest('.membership-photo-upload');
+    const preview = upload?.querySelector('.membership-photo-preview');
+    const placeholder = upload?.querySelector('.membership-photo-placeholder');
+    if (!upload || !preview || !placeholder) return;
+    if (!photo) {
+      preview.removeAttribute('src');
+      preview.hidden = true;
+      placeholder.hidden = false;
+      upload.classList.remove('has-preview');
+      return;
+    }
+    const reader = new FileReader();
+    reader.addEventListener('load', () => {
+      preview.src = String(reader.result);
+      preview.hidden = false;
+      placeholder.hidden = true;
+      upload.classList.add('has-preview');
+    }, { once: true });
+    reader.readAsDataURL(photo);
+  });
+
   /* Login and sign-up tabs */
   const accountPage = select('.account-page[data-auth-mode]');
   const authTabs = select('.auth-tab', true);
